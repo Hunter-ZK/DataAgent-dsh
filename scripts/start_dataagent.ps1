@@ -8,15 +8,13 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $isWindowsHost = $env:OS -eq "Windows_NT"
 
+# Match dsh's own resolution: DSH_HOME when explicitly provided, otherwise ~/.dsh.
 if ([string]::IsNullOrWhiteSpace($DshHome)) {
     if (-not [string]::IsNullOrWhiteSpace($env:DSH_HOME)) {
         $DshHome = $env:DSH_HOME
     }
-    elseif ($isWindowsHost -and -not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-        $DshHome = Join-Path $env:LOCALAPPDATA "DataAgent-dsh\dsh-home"
-    }
     else {
-        $DshHome = Join-Path $HOME ".dataagent-dsh/dsh-home"
+        $DshHome = Join-Path $HOME ".dsh"
     }
 }
 
@@ -24,26 +22,35 @@ $DshHome = [System.IO.Path]::GetFullPath($DshHome)
 $env:DSH_HOME = $DshHome
 $env:DSH_TELEMETRY_MODE = "DISABLED"
 
-$profileDir = Join-Path $DshHome "profiles/dataagent"
-if (-not (Test-Path $profileDir)) {
-    Write-Host "DataAgent profile is not initialized yet; running bootstrap first..." -ForegroundColor Yellow
-    & (Join-Path $PSScriptRoot "setup_dataagent.ps1") -DshHome $DshHome
-    if ($LASTEXITCODE -ne 0) {
-        throw "DataAgent profile bootstrap failed."
-    }
+$dshBin = if ($isWindowsHost) {
+    Join-Path $repoRoot "dsh/node_modules/.bin/dsh.cmd"
+} else {
+    Join-Path $repoRoot "dsh/node_modules/.bin/dsh"
+}
+
+$setupScript = Join-Path $PSScriptRoot "setup_dataagent.ps1"
+
+# Always run the idempotent bootstrap before launch. This deliberately repairs:
+# - a missing profile;
+# - a residual/incomplete profile directory;
+# - a profile that exists on disk but dsh cannot load;
+# - a missing local Guard bundle or stale repository patch.
+if (Test-Path $dshBin) {
+    & $setupScript -DshHome $DshHome -SkipDependencyInstall
+}
+else {
+    & $setupScript -DshHome $DshHome
+}
+if (-not $?) {
+    throw "DataAgent profile bootstrap failed."
 }
 
 if ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
     Write-Warning "DEEPSEEK_API_KEY is not set in this terminal. Harness can still start, but model calls require either this environment variable or a DeepSeek key saved in Settings > Models."
 }
 
-$dshBin = if ($isWindowsHost) {
-    Join-Path $repoRoot "dsh/node_modules/.bin/dsh.cmd"
-} else {
-    Join-Path $repoRoot "dsh/node_modules/.bin/dsh"
-}
 if (-not (Test-Path $dshBin)) {
-    throw "DeepSeek Harness executable was not found at $dshBin. Run scripts/setup_dataagent.ps1 first."
+    throw "DeepSeek Harness executable was not found at $dshBin after bootstrap."
 }
 
 Push-Location $repoRoot
