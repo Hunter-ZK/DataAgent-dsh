@@ -23,6 +23,7 @@ class QueryCapabilityTask:
     expect_refusal: bool = False
     expected_caveats: tuple[str, ...] = ()
     expect_scope_disclosure: bool = False
+    expect_llm: bool = False
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -85,7 +86,7 @@ def score_query_case(task: QueryCapabilityTask, obs: QueryCapabilityObservation)
         "refusal": obs.refused == task.expect_refusal,
         "caveat": None if not task.expected_caveats else _contains_all(obs.caveats, task.expected_caveats),
         "scope_disclosure": None if not task.expect_scope_disclosure else obs.scope_disclosed,
-        "real_llm": obs.llm_used,
+        "real_llm": None if not task.expect_llm else obs.llm_used,
     }
     exercised = [value for value in checks.values() if value is not None]
     passed = bool(exercised) and all(exercised) and obs.error is None
