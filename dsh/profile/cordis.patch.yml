@@ -49,7 +49,8 @@
 # agent3-guard is intentionally NOT inserted here. Installing the local
 # @hunter-zk/agent3-guard bundle adds its own row from guard-plugin/cordis.patch.yml.
 
-- id: permission-presets
+# In dsh 0.1.6-alpha.2 the @deepseek-ai/dsh-permission-presets row id is `permission`.
+- id: permission
   config:
     defaultPreset: analyst
     presets:
