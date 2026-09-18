@@ -10,15 +10,15 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $isWindowsHost = $env:OS -eq "Windows_NT"
 
+# DeepSeek Harness resolves its home as: explicit/DSH_HOME -> ~/.dsh.
+# Use the same default so a later direct `dsh --profile dataagent` invocation
+# resolves the exact profile created here.
 if ([string]::IsNullOrWhiteSpace($DshHome)) {
     if (-not [string]::IsNullOrWhiteSpace($env:DSH_HOME)) {
         $DshHome = $env:DSH_HOME
     }
-    elseif ($isWindowsHost -and -not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
-        $DshHome = Join-Path $env:LOCALAPPDATA "DataAgent-dsh\dsh-home"
-    }
     else {
-        $DshHome = Join-Path $HOME ".dataagent-dsh/dsh-home"
+        $DshHome = Join-Path $HOME ".dsh"
     }
 }
 
@@ -49,6 +49,33 @@ function Invoke-Checked {
     }
 }
 
+function Remove-StaleProfile {
+    param([Parameter(Mandatory = $true)][string]$Reason)
+    if (Test-Path $profileDir) {
+        Write-Host "==> $Reason" -ForegroundColor Yellow
+        Write-Host "    Removing stale local profile: $profileDir"
+        Remove-Item -Recurse -Force $profileDir
+    }
+}
+
+function Test-ProfileLoadable {
+    if (-not (Test-Path $profilePackage)) {
+        return $false
+    }
+
+    $probeOut = Join-Path ([System.IO.Path]::GetTempPath()) "dataagent-profile-probe.out"
+    $probeErr = Join-Path ([System.IO.Path]::GetTempPath()) "dataagent-profile-probe.err"
+    Remove-Item $probeOut, $probeErr -Force -ErrorAction SilentlyContinue
+
+    & $dshBin --profile dataagent --dump-default-config 1> $probeOut 2> $probeErr
+    $ok = $LASTEXITCODE -eq 0
+    if (-not $ok -and (Test-Path $probeErr)) {
+        Write-Host "Existing profile failed dsh loadability probe:" -ForegroundColor Yellow
+        Get-Content $probeErr | Write-Host
+    }
+    return $ok
+}
+
 if (-not $SkipDependencyInstall) {
     Push-Location $dshDir
     try {
@@ -72,35 +99,54 @@ if (-not (Test-Path $dshBin)) {
     throw "DeepSeek Harness executable was not found at $dshBin. Run this script without -SkipDependencyInstall first."
 }
 
-if ($ResetProfile -and (Test-Path $profileDir)) {
-    Write-Host "==> Reset requested; removing local profile: $profileDir"
-    Remove-Item -Recurse -Force $profileDir
+if ($ResetProfile) {
+    Remove-StaleProfile "Reset requested."
 }
 
 New-Item -ItemType Directory -Force -Path $DshHome | Out-Null
 
 Push-Location $repoRoot
 try {
-    if (-not (Test-Path $profileDir)) {
+    # A directory alone is NOT a valid dsh profile. Official custom profile
+    # initialization writes package.json; residual directories must be removed
+    # because dsh deliberately refuses to initialize into an existing directory.
+    if ((Test-Path $profileDir) -and -not (Test-Path $profilePackage)) {
+        Remove-StaleProfile "Detected an incomplete DataAgent profile directory (missing package.json)."
+    }
+    elseif (Test-Path $profilePackage) {
+        if (-not (Test-ProfileLoadable)) {
+            Remove-StaleProfile "Detected a DataAgent profile that exists on disk but cannot be loaded by dsh."
+        }
+    }
+
+    if (-not (Test-Path $profilePackage)) {
         Invoke-Checked "Initialize custom dsh profile 'dataagent' from shipped web profile" {
             & $dshBin --profile dataagent --from-default-profile web --dump-config | Out-Null
         }
     }
     else {
-        Write-Host "==> Reusing existing local dsh profile: $profileDir"
+        Write-Host "==> Reusing verified local dsh profile: $profileDir"
     }
 
     $guardInstalled = $false
     if (Test-Path $profilePackage) {
-        $profileJson = Get-Content $profilePackage -Raw | ConvertFrom-Json
-        $dependencyNames = @()
-        if ($null -ne $profileJson.dependencies) {
-            $dependencyNames += $profileJson.dependencies.PSObject.Properties.Name
+        try {
+            $profileJson = Get-Content $profilePackage -Raw | ConvertFrom-Json
+            $dependencyNames = @()
+            if ($null -ne $profileJson.dependencies) {
+                $dependencyNames += $profileJson.dependencies.PSObject.Properties.Name
+            }
+            if ($null -ne $profileJson.devDependencies) {
+                $dependencyNames += $profileJson.devDependencies.PSObject.Properties.Name
+            }
+            $guardInstalled = $dependencyNames -contains "@hunter-zk/agent3-guard"
         }
-        if ($null -ne $profileJson.devDependencies) {
-            $dependencyNames += $profileJson.devDependencies.PSObject.Properties.Name
+        catch {
+            Remove-StaleProfile "DataAgent profile package.json is unreadable."
+            Invoke-Checked "Reinitialize custom dsh profile 'dataagent'" {
+                & $dshBin --profile dataagent --from-default-profile web --dump-config | Out-Null
+            }
         }
-        $guardInstalled = $dependencyNames -contains "@hunter-zk/agent3-guard"
     }
 
     if (-not $guardInstalled) {
@@ -160,4 +206,5 @@ Write-Host ""
 Write-Host "Next:"
 Write-Host '  1. Set $env:DEEPSEEK_API_KEY = "sk-..." (or configure DeepSeek in Harness Settings > Models).'
 Write-Host '  2. Start Agent3 MCP in another terminal: $env:AGENT3_MCP_POC_MODE="1"; python -m agent3.adapters.mcp.server'
-Write-Host '  3. Start Harness from the repository root: .\dsh\node_modules\.bin\dsh.cmd --profile dataagent'
+Write-Host '  3. Start Harness with: .\scripts\start_dataagent.ps1'
+Write-Host '     (Direct dsh also works because this script uses the official ~/.dsh home by default.)'
