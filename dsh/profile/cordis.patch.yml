@@ -1,5 +1,6 @@
 # DataAgent dsh profile for @deepseek-ai/dsh 0.1.6-alpha.2.
 # Existing rows are patched directly by id; only new rows use `insert`.
+# Run dsh from the repository root so ./dsh/presets resolves deterministically.
 # Always verify the composed result with `dsh --profile dataagent --dump-config`.
 
 # Disable public egress surfaces for the intended intranet deployment.
@@ -63,10 +64,12 @@
         approval: ask
         name: 数据工程师
 
+# V1 business-query sessions use only the repository-owned restricted preset.
 - id: agent-presets
   config:
     default: dataagent-query
     roots:
-      - path: /opt/agent3/presets
+      - path: ./dsh/presets
         trust: system
     includeShippedRoot: false
+    includeUserRoot: false
