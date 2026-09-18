@@ -18,6 +18,24 @@ class MandatoryFilter:
 
 
 @dataclass(frozen=True, slots=True)
+class DimensionValue:
+    value: str
+    name: str
+    aliases: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class DimensionDefinition:
+    """Business vocabulary mapped to one physical dimension field."""
+
+    id: str
+    name: str
+    field: str
+    aliases: tuple[str, ...] = ()
+    values: tuple[DimensionValue, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class MetricDefinition:
     id: str
     name: str
@@ -31,6 +49,7 @@ class MetricDefinition:
     valid_dimensions: tuple[str, ...] = ()
     owner: str = ""
     caveats: str = ""
+    time_field: str = "dt"
 
 
 @dataclass(frozen=True, slots=True)
