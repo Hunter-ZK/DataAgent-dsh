@@ -26,6 +26,9 @@ def build_poc_server():
     mcp.tool()(adapter.validate_sql)
     mcp.tool()(adapter.explain_sql)
     mcp.tool()(adapter.compile_query)
+    # Safe HITL acceptance surface: guard-plugin requires approval before this tool runs,
+    # while Agent3 Core always reports execution_enabled=False in V1.
+    mcp.tool()(adapter.submit_ddl)
     return mcp
 
 
