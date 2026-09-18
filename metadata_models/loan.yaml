@@ -1,0 +1,12 @@
+tables:
+  - full_name: dw.dwd_loan_snapshot
+    description: 贷款余额日快照
+    aliases: [贷款快照, loan balance]
+    partition_fields: [dt]
+    columns:
+      - {name: dt, data_type: string, description: 数据日期}
+      - {name: org_id, data_type: string, description: 机构编号}
+      - {name: region_code, data_type: string, description: 地区代码}
+      - {name: product_id, data_type: string, description: 产品编号}
+      - {name: balance_amt, data_type: 'decimal(20,2)', description: 贷款余额}
+      - {name: status, data_type: string, description: 贷款状态}

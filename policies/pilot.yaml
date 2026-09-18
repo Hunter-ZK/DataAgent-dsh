@@ -1,0 +1,9 @@
+policies:
+  - policy_id: pilot_region_scope
+    version: 1
+    selector:
+      roles: [pilot-region-user]
+    rules:
+      - dimension: region_code
+        operator: in
+        values: ['4401', '4403']

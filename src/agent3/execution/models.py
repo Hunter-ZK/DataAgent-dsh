@@ -20,6 +20,8 @@ class ExecutionLimits:
 class ResultSet:
     columns: tuple[str, ...]
     rows: tuple[tuple[Any, ...], ...]
+    truncated: bool = False
+    elapsed_ms: float | None = None
 
     @property
     def row_count(self) -> int:
