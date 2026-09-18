@@ -8,6 +8,7 @@ from agent3.services.core import Agent3Core
 
 class MCPToolAdapter:
     """Thin protocol projection. No business rules belong here."""
+
     def __init__(self, core: Agent3Core, authz_provider: AuthzProvider) -> None:
         self._core = core
         self._authz = authz_provider
@@ -41,3 +42,7 @@ class MCPToolAdapter:
             filters=tuple(MandatoryFilter(field=i["field"], op=i["op"], value=i["value"]) for i in (filters or ())),
         )
         return self._core.compile_query(self._authz(), ir)
+
+    def submit_ddl(self, ddl: str) -> dict[str, Any]:
+        """HITL acceptance surface. Core intentionally never executes production DDL in V1."""
+        return self._core.submit_ddl(self._authz(), ddl)
