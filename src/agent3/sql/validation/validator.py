@@ -14,9 +14,10 @@ from agent3.sql.validation.models import IssueAction, Severity, ValidationIssue,
 class SQLValidator:
     """Deterministic Trusted-SQL quality gate.
 
-    The V2 Core keeps the mature Agent3.0 rule semantics (stable codes and
-    IssueAction-driven routing) while adding the V1 semantic model checks.
-    This service validates SQL candidates; it does not grant execution permission.
+    Mature Agent3.0 guardrail contracts are retained: stable issue codes,
+    IssueAction-driven routing, and safe textual preflight rules that can diagnose a
+    uniquely repairable dialect error before a strict AST parse. V2 semantic checks are
+    layered on top instead of replacing those guardrails.
     """
 
     def __init__(self, metadata: MetadataProvider, semantics: SemanticRegistry) -> None:
@@ -33,9 +34,29 @@ class SQLValidator:
         metric_id: str | None = None,
     ) -> ValidationResult:
         issues: list[ValidationIssue] = []
+
+        # Agent3.0 mature MaxCompute rule: this uniquely repairable syntax error must be
+        # diagnosed before AST parsing, otherwise a generic parser error hides AUTO_FIX.
+        if dialect.strip().casefold() in {"maxcompute", "odps", "dataworks"}:
+            normalized_text = " ".join(sql.strip().lower().split())
+            if re.search(r"\binsert\s+overwrite\s+(?!table\b)", normalized_text):
+                issues.append(
+                    ValidationIssue(
+                        "MAXCOMPUTE_INSERT_OVERWRITE_TABLE_REQUIRED",
+                        Severity.ERROR,
+                        "检测到 INSERT OVERWRITE 后未使用 TABLE 关键字。",
+                        "改为 INSERT OVERWRITE TABLE 目标表 ...",
+                        {"dialect": dialect},
+                        IssueAction.AUTO_FIX,
+                        True,
+                    )
+                )
+
         try:
             statements = self._analyzer.parse_program(sql, dialect=dialect)
         except SQLAnalysisError as exc:
+            if issues:
+                return ValidationResult(False, dialect, tuple(issues))
             return ValidationResult(
                 False,
                 dialect,
@@ -76,8 +97,9 @@ class SQLValidator:
                 (ValidationIssue("SQL_PARSE_ERROR", Severity.ERROR, str(exc), action=IssueAction.BLOCK),),
             )
 
-        # Mature Agent3.0 safety rule: DROP/TRUNCATE is an unconditional BLOCK.
         statement_key = tree.key.casefold()
+
+        # Mature Agent3.0 safety rule: DROP/TRUNCATE is an unconditional BLOCK.
         if statement_key in {"drop", "truncate", "truncatetable"}:
             issues.append(
                 ValidationIssue(
@@ -103,22 +125,6 @@ class SQLValidator:
                     IssueAction.BLOCK,
                 )
             )
-
-        # Mature Agent3.0 MaxCompute rule retained verbatim at the contract level.
-        if dialect.strip().casefold() in {"maxcompute", "odps", "dataworks"}:
-            normalized_text = " ".join(sql.strip().lower().split())
-            if re.search(r"\binsert\s+overwrite\s+(?!table\b)", normalized_text):
-                issues.append(
-                    ValidationIssue(
-                        "MAXCOMPUTE_INSERT_OVERWRITE_TABLE_REQUIRED",
-                        Severity.ERROR,
-                        "检测到 INSERT OVERWRITE 后未使用 TABLE 关键字。",
-                        "改为 INSERT OVERWRITE TABLE 目标表 ...",
-                        {"dialect": dialect},
-                        IssueAction.AUTO_FIX,
-                        True,
-                    )
-                )
 
         resolved_tables = []
         for table_name in analysis.tables:
