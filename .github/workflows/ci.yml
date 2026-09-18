@@ -1,0 +1,62 @@
+name: DataAgent V1 Gate
+
+on:
+  push:
+    branches: [main, "migration/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  python-core:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[all]'
+      - name: Compile
+        run: python -m compileall -q src tests examples scripts
+      - name: Architecture boundaries
+        run: python scripts/check_architecture.py
+      - name: Tests
+        run: python -m pytest
+      - name: Stage-0 evaluation smoke
+        run: python examples/stage0_eval.py
+
+  guard-plugin:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install guard dependencies
+        working-directory: guard-plugin
+        run: npm install --no-audit --no-fund
+      - name: Build guard plugin
+        working-directory: guard-plugin
+        run: npm run build
+      - name: Test guard policy
+        working-directory: guard-plugin
+        run: npm test
+
+  dsh-runtime-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned dsh
+        working-directory: dsh
+        run: npm install --no-audit --no-fund
+      - name: Verify dsh CLI
+        working-directory: dsh
+        run: |
+          npm list @deepseek-ai/dsh
+          npx dsh --version

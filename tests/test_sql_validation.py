@@ -1,0 +1,35 @@
+from agent3.contracts.authz import AuthzContext
+from agent3.services.factory import build_demo_core
+
+
+def codes(result: dict) -> set[str]:
+    return {issue["code"] for issue in result["issues"]}
+
+
+def test_valid_metric_sql_passes() -> None:
+    sql = "SELECT org_id, SUM(balance_amt) AS loan_balance FROM dw.dwd_loan_snapshot WHERE status <> 'cancelled' AND dt = '2026-08-31' GROUP BY org_id"
+    result = build_demo_core().validate_sql(AuthzContext.system(), sql, metric_id="loan_balance")
+    assert result["valid"] is True
+    assert "METRIC_MISMATCH" not in codes(result)
+
+
+def test_metric_mandatory_filter_and_time_additivity_are_enforced() -> None:
+    sql = "SELECT SUM(balance_amt) AS loan_balance FROM dw.dwd_loan_snapshot WHERE dt IN ('2026-07-31', '2026-08-31')"
+    result = build_demo_core().validate_sql(AuthzContext.system(), sql, metric_id="loan_balance")
+    assert result["valid"] is False
+    assert {"MISSING_MANDATORY_FILTER", "NON_ADDITIVE_OVER_TIME"} <= codes(result)
+
+
+def test_unknown_table_and_column_fail_closed() -> None:
+    core = build_demo_core()
+    result = core.validate_sql(AuthzContext.system(), "select imaginary from dw.dwd_loan_snapshot where dt='2026-08-31'")
+    assert result["valid"] is False
+    assert "UNKNOWN_COLUMN" in codes(result)
+    missing = core.validate_sql(AuthzContext.system(), "select x from dw.no_such_table")
+    assert "UNKNOWN_TABLE" in codes(missing)
+
+
+def test_write_statement_is_not_treated_as_readonly_sql() -> None:
+    result = build_demo_core().validate_sql(AuthzContext.system(), "drop table dw.dwd_loan_snapshot")
+    assert result["valid"] is False
+    assert "WRITE_STATEMENT" in codes(result)
