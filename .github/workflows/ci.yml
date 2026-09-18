@@ -38,6 +38,12 @@ jobs:
       - name: Install guard dependencies
         working-directory: guard-plugin
         run: npm install --no-audit --no-fund
+      - name: Export guard lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: guard-lockfile
+          path: guard-plugin/package-lock.json
+          if-no-files-found: error
       - name: Build guard plugin
         working-directory: guard-plugin
         run: npm run build
@@ -55,6 +61,12 @@ jobs:
       - name: Install pinned dsh
         working-directory: dsh
         run: npm install --no-audit --no-fund
+      - name: Export dsh lockfile
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-lockfile
+          path: dsh/package-lock.json
+          if-no-files-found: error
       - name: Verify dsh CLI
         working-directory: dsh
         run: |
