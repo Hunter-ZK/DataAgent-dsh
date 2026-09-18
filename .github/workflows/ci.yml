@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   python-core:
     runs-on: ubuntu-24.04
@@ -38,12 +41,6 @@ jobs:
       - name: Install guard dependencies
         working-directory: guard-plugin
         run: npm install --no-audit --no-fund
-      - name: Export guard lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: guard-lockfile
-          path: guard-plugin/package-lock.json
-          if-no-files-found: error
       - name: Build guard plugin
         working-directory: guard-plugin
         run: npm run build
@@ -61,14 +58,35 @@ jobs:
       - name: Install pinned dsh
         working-directory: dsh
         run: npm install --no-audit --no-fund
-      - name: Export dsh lockfile
-        uses: actions/upload-artifact@v4
-        with:
-          name: dsh-lockfile
-          path: dsh/package-lock.json
-          if-no-files-found: error
       - name: Verify dsh CLI
         working-directory: dsh
         run: |
           npm list @deepseek-ai/dsh
           npx dsh --version
+
+  freeze-lockfiles:
+    if: github.ref == 'refs/heads/migration/v1-dsh'
+    needs: [guard-plugin, dsh-runtime-smoke]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: migration/v1-dsh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Generate exact dependency lockfiles
+        run: |
+          (cd guard-plugin && npm install --package-lock-only --ignore-scripts --no-audit --no-fund)
+          (cd dsh && npm install --package-lock-only --ignore-scripts --no-audit --no-fund)
+      - name: Commit lockfiles
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add guard-plugin/package-lock.json dsh/package-lock.json
+          if git diff --cached --quiet; then
+            echo "Lockfiles already frozen"
+          else
+            git commit -m "build: freeze Node dependency lockfiles"
+            git push origin HEAD:migration/v1-dsh
+          fi
