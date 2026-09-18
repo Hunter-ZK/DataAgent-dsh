@@ -86,13 +86,27 @@ That mode uses a static PoC identity and MUST NOT be used for production deploym
 
 ### Windows: bootstrap local DeepSeek Harness
 
-The repository does **not** treat `dsh/profile/cordis.patch.yml` as an automatically existing dsh profile. A custom `dataagent` profile must first be created under `$DSH_HOME`. Use the repository bootstrap script instead of launching `--profile dataagent` directly on a fresh machine:
+The repository does **not** treat `dsh/profile/cordis.patch.yml` as an automatically existing dsh profile. A custom `dataagent` profile must first be created under the Harness Home.
+
+The bootstrap/start scripts now use the same Home resolution as DeepSeek Harness itself:
+
+```text
+explicit DSH_HOME > ~/.dsh
+```
+
+So on a normal Windows account the profile lives under:
+
+```text
+C:\Users\<you>\.dsh\profiles\dataagent
+```
+
+Run once:
 
 ```powershell
 .\scripts\setup_dataagent.ps1
 ```
 
-The script is idempotent. It installs pinned dependencies, creates the custom profile when missing, installs the local Guard bundle, applies the repository profile patch, and validates the effective dsh configuration.
+The script is idempotent and self-healing. It installs pinned dependencies, creates the custom profile when missing, repairs an incomplete/unloadable local profile left by a failed previous attempt, installs the local Guard bundle, applies the repository profile patch, and validates the effective dsh configuration.
 
 Then provide your DeepSeek official API key:
 
@@ -113,6 +127,8 @@ Start the local Harness:
 ```powershell
 .\scripts\start_dataagent.ps1
 ```
+
+`start_dataagent.ps1` always runs a lightweight profile self-check before launching Harness, so a missing or stale `dataagent` profile is repaired automatically.
 
 The deployment shape is:
 
@@ -151,8 +167,8 @@ guard-plugin/               dsh Cordis guard/audit glue
 semantic_models/            Git source of truth for semantic definitions
 benchmarks/                  public synthetic evaluation seeds
 tests/                       release and architecture gates
-scripts/setup_dataagent.ps1  idempotent local profile bootstrap
-scripts/start_dataagent.ps1  local Harness launcher
+scripts/setup_dataagent.ps1  idempotent/self-healing local profile bootstrap
+scripts/start_dataagent.ps1  self-checking local Harness launcher
 ```
 
 See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/MIGRATION.md`, and `docs/LOCAL_ACCEPTANCE.md` for design boundaries, migration status, and local acceptance.
