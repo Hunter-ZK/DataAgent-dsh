@@ -84,6 +84,8 @@ python -m agent3.adapters.mcp.server
 
 That mode uses a static PoC identity and MUST NOT be used for production deployment.
 
+For a full **Windows local acceptance with a real LLM + MCP + Human-in-the-Loop**, follow [`docs/LOCAL_ACCEPTANCE.md`](docs/LOCAL_ACCEPTANCE.md). It includes deterministic Core checks, dsh profile initialization, the restricted `dataagent-query` preset, real MCP tool-call verification, LLM self-fix validation, and reject/allow-once HITL tests.
+
 ## DeepSeek Harness
 
 The repository pins `@deepseek-ai/dsh` to `0.1.6-alpha.2` in `dsh/package.json`. The deployment profile disables DeepSeek session upload, telemetry, web search/fetch and the web tool, points inference at an internal OpenAI-compatible service, connects Agent3 over streamable HTTP MCP, and loads the local guard plugin.
@@ -104,11 +106,11 @@ src/agent3/                 harness-agnostic Python Core
   routing/                  Task Contract routing rules
   adapters/                 MCP / HTTP / CLI protocol projections
 .dsh/skills/                domain workflow instructions
-dsh/                        pinned dsh runtime + profile template
+dsh/                        pinned dsh runtime + profile template + restricted query preset
 guard-plugin/               dsh Cordis guard/audit glue
 semantic_models/            Git source of truth for semantic definitions
 benchmarks/                  public synthetic evaluation seeds
 tests/                       release and architecture gates
 ```
 
-See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, and `docs/MIGRATION.md` for design boundaries and migration status.
+See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/MIGRATION.md`, and `docs/LOCAL_ACCEPTANCE.md` for design boundaries, migration status, and local acceptance.

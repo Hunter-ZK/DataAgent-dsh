@@ -1,34 +1,39 @@
-# DataAgent dsh profile. This is a deployment template; verify every patch with --dump-config.
-- patch:
-    - id: session-log-deepseek
-      disabled: true
-    - id: session-telemetry-otel
-      disabled: true
-    - id: web-search-deepseek
-      disabled: true
-    - id: web-fetch-http
-      disabled: true
-    - id: tool-web
-      disabled: true
+# DataAgent dsh profile for @deepseek-ai/dsh 0.1.6-alpha.2.
+# Existing rows are patched directly by id; only new rows use `insert`.
+# Run dsh from the repository root so ./dsh/presets resolves deterministically.
+# Always verify the composed result with `dsh --profile dataagent --dump-config`.
 
-- patch:
-    - id: llm-pi-ai
-      config:
-        providers:
-          local:
-            displayName: 内网推理服务
-            api: openai-completions
-            baseURL: http://127.0.0.1:8100/v1
-            apiKeyEnv: LOCAL_LLM_KEY
-            models:
-              - id: deepseek-v3-local
-                name: DeepSeek V3 Local
-                contextWindow: 131072
-    - id: agent-default-model
-      config:
-        provider: local
-        model: deepseek-v3-local
+# Disable public egress surfaces for the intended intranet deployment.
+- id: session-log-deepseek
+  disabled: true
+- id: session-telemetry-otel
+  disabled: true
+- id: web-search-deepseek
+  disabled: true
+- id: web-fetch-http
+  disabled: true
+- id: tool-web
+  disabled: true
 
+# Point dsh at an OpenAI-compatible internal inference endpoint.
+- id: llm-pi-ai
+  config:
+    providers:
+      local:
+        displayName: 内网推理服务
+        api: openai-completions
+        baseURL: http://127.0.0.1:8100/v1
+        apiKeyEnv: LOCAL_LLM_KEY
+        models:
+          - id: deepseek-v3-local
+            name: DeepSeek V3 Local
+            contextWindow: 131072
+- id: agent-default-model
+  config:
+    provider: local
+    model: deepseek-v3-local
+
+# Agent3 MCP is an adapter; business logic remains in Python Core.
 - insert:
     - id: mcp-agent3
       name: '@deepseek-ai/dsh-mcp-client'
@@ -41,30 +46,30 @@
         reconnect:
           enabled: true
           maxAttempts: 20
-    - id: agent3-guard
-      name: '@hunter-zk/agent3-guard'
-      config:
-        auditEndpoint: http://127.0.0.1:8000/audit
 
-- patch:
-    - id: permission-presets
-      config:
-        defaultPreset: analyst
-        presets:
-          analyst:
-            sandbox: read-only
-            approval: ask
-            name: 分析师
-          engineer:
-            sandbox: workspace-write
-            approval: ask
-            name: 数据工程师
+# agent3-guard is intentionally NOT inserted here. Installing the local
+# @hunter-zk/agent3-guard bundle adds its own row from guard-plugin/cordis.patch.yml.
 
-- patch:
-    - id: agent-presets
-      config:
-        default: dataagent-query
-        roots:
-          - path: /opt/agent3/presets
-            trust: system
-        includeShippedRoot: false
+# In dsh 0.1.6-alpha.2 the @deepseek-ai/dsh-permission-presets row id is `permission`.
+- id: permission
+  config:
+    defaultPreset: analyst
+    presets:
+      analyst:
+        sandbox: read-only
+        approval: ask
+        name: 分析师
+      engineer:
+        sandbox: workspace-write
+        approval: ask
+        name: 数据工程师
+
+# V1 business-query sessions use only the repository-owned restricted preset.
+- id: agent-presets
+  config:
+    default: dataagent-query
+    roots:
+      - path: ./dsh/presets
+        trust: system
+    includeShippedRoot: false
+    includeUserRoot: false
