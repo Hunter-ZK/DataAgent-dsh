@@ -6,6 +6,7 @@ from typing import Any
 
 
 class MessageRoute(StrEnum):
+    PENDING = "pending"
     QUERY_ENGINE = "query_engine"
     DSH = "dsh"
 
@@ -58,5 +59,6 @@ class ConversationMessage:
     role: str
     route: MessageRoute
     content: dict[str, Any]
+    reply_to_message_id: str | None = None
     dsh_session_id: str | None = None
     sql_hash: str | None = None
