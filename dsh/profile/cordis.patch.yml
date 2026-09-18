@@ -1,0 +1,70 @@
+# DataAgent dsh profile. This is a deployment template; verify every patch with --dump-config.
+- patch:
+    - id: session-log-deepseek
+      disabled: true
+    - id: session-telemetry-otel
+      disabled: true
+    - id: web-search-deepseek
+      disabled: true
+    - id: web-fetch-http
+      disabled: true
+    - id: tool-web
+      disabled: true
+
+- patch:
+    - id: llm-pi-ai
+      config:
+        providers:
+          local:
+            displayName: 内网推理服务
+            api: openai-completions
+            baseURL: http://127.0.0.1:8100/v1
+            apiKeyEnv: LOCAL_LLM_KEY
+            models:
+              - id: deepseek-v3-local
+                name: DeepSeek V3 Local
+                contextWindow: 131072
+    - id: agent-default-model
+      config:
+        provider: local
+        model: deepseek-v3-local
+
+- insert:
+    - id: mcp-agent3
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: agent3
+        transport: streamable-http
+        url: http://127.0.0.1:8900/mcp
+        toolCallTimeoutMs: 120000
+        failOnStartupError: true
+        reconnect:
+          enabled: true
+          maxAttempts: 20
+    - id: agent3-guard
+      name: '@hunter-zk/agent3-guard'
+      config:
+        auditEndpoint: http://127.0.0.1:8000/audit
+
+- patch:
+    - id: permission-presets
+      config:
+        defaultPreset: analyst
+        presets:
+          analyst:
+            sandbox: read-only
+            approval: ask
+            name: 分析师
+          engineer:
+            sandbox: workspace-write
+            approval: ask
+            name: 数据工程师
+
+- patch:
+    - id: agent-presets
+      config:
+        default: dataagent-query
+        roots:
+          - path: /opt/agent3/presets
+            trust: system
+        includeShippedRoot: false

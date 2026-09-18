@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env
+.DS_Store
+*.db
+*.sqlite
+*.sqlite3
+validation_runs/
+reports/local/
+node_modules/
+guard-plugin/dist/

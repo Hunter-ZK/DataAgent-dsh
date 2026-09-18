@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dataagent-dsh"
+version = "0.1.0"
+description = "Harness-agnostic DataAgent core with DeepSeek Harness adapters"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "sqlglot>=28.0.0,<29.0.0",
+  "duckdb>=1.4,<2",
+  "pydantic>=2.7,<3",
+  "PyYAML>=6,<7",
+]
+
+[project.optional-dependencies]
+http = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
+mcp = ["mcp>=1.13,<2"]
+dev = ["pytest>=9,<10"]
+all = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "mcp>=1.13,<2", "pytest>=9,<10"]
+
+[project.scripts]
+agent3 = "agent3.adapters.cli.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

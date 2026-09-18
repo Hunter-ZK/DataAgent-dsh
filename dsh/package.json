@@ -1,0 +1,11 @@
+{
+  "name": "dataagent-dsh-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "engines": {
+    "node": "^22.19 || >=24"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.6-alpha.2"
+  }
+}
