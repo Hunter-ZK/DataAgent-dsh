@@ -9,5 +9,6 @@ __pycache__/
 *.sqlite3
 validation_runs/
 reports/local/
+.runtime/
 node_modules/
 guard-plugin/dist/
