@@ -11,6 +11,9 @@ class ClarificationRequest:
     conversation_id: str
     message_id: str
     question: str
+    original_objective: str
+    context_metric_id: str | None = None
+    page_context: str | None = None
     options: tuple[str, ...] = ()
     unresolved_fields: tuple[str, ...] = ()
 
@@ -35,16 +38,24 @@ class ClarificationStore:
         conversation_id: str,
         message_id: str,
         question: str,
+        original_objective: str,
+        context_metric_id: str | None = None,
+        page_context: str | None = None,
         options: tuple[str, ...] = (),
         unresolved_fields: tuple[str, ...] = (),
     ) -> ClarificationRequest:
         if not question.strip():
             raise ValueError("clarification question must not be empty")
+        if not original_objective.strip():
+            raise ValueError("original_objective must not be empty")
         request = ClarificationRequest(
             id=str(uuid.uuid4()),
             conversation_id=conversation_id,
             message_id=message_id,
             question=question,
+            original_objective=original_objective,
+            context_metric_id=context_metric_id,
+            page_context=page_context,
             options=options,
             unresolved_fields=unresolved_fields,
         )
