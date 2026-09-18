@@ -76,45 +76,53 @@ agent3 validate "SELECT ..." --metric loan_balance
 
 ## 3. 一键初始化本地 DeepSeek Harness profile
 
-### 为什么你会看到 `profile dataagent does not exist`
+### 为什么会看到 `profile dataagent does not exist`
 
 `dsh/profile/cordis.patch.yml` 是**仓库里的 profile patch 模板**，它本身不会自动在 Harness Home 中创建一个名为 `dataagent` 的 profile。
 
-DeepSeek Harness 的自定义 profile 实际位于：
+DeepSeek Harness 当前的 Home 解析规则是：
 
 ```text
-$DSH_HOME/profiles/dataagent
+显式 DSH_HOME > ~/.dsh
 ```
 
-首次使用必须先从 shipped `web` profile 初始化。为避免漏步骤，本仓库提供幂等初始化脚本：
+因此本仓库现在也使用同一规则。未显式设置 `DSH_HOME` 时，`dataagent` profile 默认创建在：
+
+```text
+~/.dsh/profiles/dataagent
+```
+
+Windows 一般对应：
+
+```text
+C:\Users\<你的用户名>\.dsh\profiles\dataagent
+```
+
+首次使用运行：
 
 ```powershell
 .\scripts\setup_dataagent.ps1
-```
-
-默认 `DSH_HOME`：
-
-```text
-%LOCALAPPDATA%\DataAgent-dsh\dsh-home
 ```
 
 脚本会自动完成：
 
 1. `dsh/npm ci`；
 2. `guard-plugin/npm ci` + build；
-3. 若 `dataagent` profile 不存在，则执行 `--from-default-profile web` 创建；
-4. 安装本地 `@hunter-zk/agent3-guard` bundle；
-5. 复制仓库 `dsh/profile/cordis.patch.yml`；
-6. 执行 `--dump-config` 检查 `deepseek-official`、MCP、Guard、`dataagent-query`；
-7. 拒绝残留的旧本地模型配置（`127.0.0.1:8100` / `LOCAL_LLM_KEY` / `deepseek-v3-local`）。
+3. 检查 `dataagent` profile 是否真正可被 dsh 加载；
+4. 对缺失 profile 自动从 shipped `web` profile 创建；
+5. 对“目录存在但 profile 无效/残缺”的情况自动清理并重建；
+6. 安装本地 `@hunter-zk/agent3-guard` bundle；
+7. 复制仓库 `dsh/profile/cordis.patch.yml`；
+8. 执行 `--dump-config` 检查 `deepseek-official`、MCP、Guard、`dataagent-query`；
+9. 拒绝残留的旧本地模型配置（`127.0.0.1:8100` / `LOCAL_LLM_KEY` / `deepseek-v3-local`）。
 
-如果你之前留下了损坏或半初始化的本地 profile，并且确认可以重建，可以显式执行：
+如果你明确想从零重建，也仍可以执行：
 
 ```powershell
 .\scripts\setup_dataagent.ps1 -ResetProfile
 ```
 
-`-ResetProfile` 会删除**本机** `$DSH_HOME/profiles/dataagent` 后重建，不会修改 Git 仓库。
+这只会删除本机 `~/.dsh/profiles/dataagent` 后重建，不会修改 Git 仓库。
 
 ## 4. 配置真实 DeepSeek API
 
@@ -177,18 +185,28 @@ Test-NetConnection 127.0.0.1 -Port 8900
 
 ## 6. 启动本地 DeepSeek Harness
 
-回到用于 Harness 的 PowerShell，设置 API Key 后直接使用仓库启动脚本：
+回到用于 Harness 的 PowerShell，设置 API Key 后：
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "sk-你的真实DeepSeekKey"
 .\scripts\start_dataagent.ps1
 ```
 
-如果 profile 还没初始化，`start_dataagent.ps1` 会先自动调用 `setup_dataagent.ps1`，因此不会再出现首次启动时的：
+**推荐始终使用这个脚本启动。** 它每次启动前都会先执行一次轻量幂等自检，自动修复：
 
-```text
-profile dataagent does not exist
+- profile 不存在；
+- 之前失败留下的空/残缺 profile 目录；
+- profile 在磁盘上但 dsh 无法加载；
+- Guard bundle 缺失；
+- 仓库 profile patch 未更新。
+
+因为仓库现在默认使用 dsh 官方 `~/.dsh` Home，所以初始化成功后，即使你直接运行仓库内固定版本：
+
+```powershell
+.\dsh\node_modules\.bin\dsh.cmd --profile dataagent
 ```
+
+也应该能找到同一个 profile。但日常仍建议使用 `start_dataagent.ps1`，避免环境差异。
 
 默认 Web 地址：
 
@@ -200,15 +218,6 @@ http://127.0.0.1:3080
 
 ```text
 dataagent-query
-```
-
-如果你想手工启动而不是使用脚本，必须先完成第 3 节初始化，然后：
-
-```powershell
-$env:DSH_HOME = "$env:LOCALAPPDATA\DataAgent-dsh\dsh-home"
-$env:DSH_TELEMETRY_MODE = "DISABLED"
-$env:DEEPSEEK_API_KEY = "sk-..."
-.\dsh\node_modules\.bin\dsh.cmd --profile dataagent
 ```
 
 ## 7. 验收真实 LLM + MCP SQL 闭环
