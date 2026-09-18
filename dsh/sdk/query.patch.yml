@@ -1,0 +1,64 @@
+# Invocation patch for the Python SDK business-query runtime.
+# Base profile: shipped `sdk` (must retain @deepseek-ai/dsh-sdk-app).
+
+# Only DeepSeek official inference may leave the host. Session upload,
+# telemetry and general-purpose web surfaces remain disabled.
+- id: session-log-deepseek
+  disabled: true
+- id: session-telemetry-otel
+  disabled: true
+- id: web-search-deepseek
+  disabled: true
+- id: web-fetch-http
+  disabled: true
+- id: tool-web
+  disabled: true
+
+- id: llm-deepseek
+  config:
+    apiKeyEnv: DEEPSEEK_API_KEY
+
+- id: agent-default-model
+  config:
+    provider: deepseek-official
+    model: deepseek-v4-flash
+
+# Query runtime must not expose developer mutation surfaces. Business HITL is
+# owned by agent3-api, not dsh tool approval.
+- id: tool-bash
+  disabled: true
+- id: tool-pwsh
+  disabled: true
+- id: tool-jobs
+  disabled: true
+- id: tool-fs
+  disabled: true
+- id: tool-fs-search
+  disabled: true
+- id: tool-plugin-manager
+  disabled: true
+- id: plugin-manager
+  disabled: true
+
+# Agent3 remains the only Data Intelligence tool boundary.
+- insert:
+    - id: mcp-agent3
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: agent3
+        transport: streamable-http
+        url: http://127.0.0.1:8900/mcp
+        toolCallTimeoutMs: 120000
+        failOnStartupError: true
+        reconnect:
+          enabled: true
+          maxAttempts: 20
+
+- id: agent-presets
+  config:
+    default: dataagent-query-sdk
+    roots:
+      - path: ./dsh/presets
+        trust: system
+    includeShippedRoot: false
+    includeUserRoot: false
