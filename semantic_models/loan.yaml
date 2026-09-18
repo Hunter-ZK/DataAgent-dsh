@@ -1,3 +1,24 @@
+dimensions:
+  - id: region_code
+    name: 地区
+    field: region_code
+    aliases: [区域, 地域]
+    values:
+      - value: "4403"
+        name: 深圳
+        aliases: [深圳市]
+      - value: "4401"
+        name: 广州
+        aliases: [广州市]
+  - id: org_id
+    name: 机构
+    field: org_id
+    aliases: [机构号, 机构编号]
+  - id: product_id
+    name: 产品
+    field: product_id
+    aliases: [产品编号]
+
 metrics:
   - id: loan_balance
     name: 贷款余额
@@ -10,6 +31,7 @@ metrics:
         op: ne
         value: cancelled
     grain: [dt, org_id, product_id]
+    time_field: dt
     additivity:
       time: non_additive
       org: additive
