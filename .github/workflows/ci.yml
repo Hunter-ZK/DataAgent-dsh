@@ -2,7 +2,7 @@ name: DataAgent V1 Gate
 
 on:
   push:
-    branches: [main, "migration/**"]
+    branches: [main, "migration/**", "fix/**"]
   pull_request:
     branches: [main]
 
@@ -63,3 +63,46 @@ jobs:
         run: |
           npm list @deepseek-ai/dsh
           npx dsh --version
+
+  dsh-profile-integration:
+    runs-on: ubuntu-24.04
+    env:
+      DSH_TELEMETRY_MODE: DISABLED
+      LOCAL_LLM_KEY: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install deterministic runtime tooling
+        run: |
+          npm install --global pnpm@11.7.0
+          (cd dsh && npm ci --no-audit --no-fund)
+          (cd guard-plugin && npm ci --no-audit --no-fund && npm run build)
+      - name: Initialize custom dsh profile without boot
+        env:
+          DSH_HOME: ${{ runner.temp }}/dsh-home
+        run: |
+          ./dsh/node_modules/.bin/dsh --profile dataagent --from-default-profile web --dump-config > "${RUNNER_TEMP}/initial-config.txt"
+      - name: Install and enable local Agent3 guard bundle
+        env:
+          DSH_HOME: ${{ runner.temp }}/dsh-home
+        run: |
+          ./dsh/node_modules/.bin/dsh plugin --profile dataagent add "${GITHUB_WORKSPACE}/guard-plugin"
+          cp dsh/profile/cordis.patch.yml "${DSH_HOME}/profiles/dataagent/cordis.patch.yml"
+      - name: Validate composed DataAgent profile
+        env:
+          DSH_HOME: ${{ runner.temp }}/dsh-home
+        run: |
+          set -o pipefail
+          ./dsh/node_modules/.bin/dsh --profile dataagent --dump-config > "${RUNNER_TEMP}/dataagent-config.txt" 2> "${RUNNER_TEMP}/dataagent-config.err"
+          cat "${RUNNER_TEMP}/dataagent-config.err"
+          grep -q "agent3-guard" "${RUNNER_TEMP}/dataagent-config.txt"
+          grep -q "mcp-agent3" "${RUNNER_TEMP}/dataagent-config.txt"
+          grep -q "session-log-deepseek" "${RUNNER_TEMP}/dataagent-config.txt"
+          grep -q "disabled: true" "${RUNNER_TEMP}/dataagent-config.txt"
+          grep -q "deepseek-v3-local" "${RUNNER_TEMP}/dataagent-config.txt"
+          if grep -Eqi "unmatched|not found|failed to resolve" "${RUNNER_TEMP}/dataagent-config.err"; then
+            echo "DataAgent profile contains unresolved patch targets" >&2
+            exit 1
+          fi
