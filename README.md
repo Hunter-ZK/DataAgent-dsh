@@ -84,13 +84,53 @@ python -m agent3.adapters.mcp.server
 
 That mode uses a static PoC identity and MUST NOT be used for production deployment.
 
-For a full **Windows local acceptance with a real LLM + MCP + Human-in-the-Loop**, follow [`docs/LOCAL_ACCEPTANCE.md`](docs/LOCAL_ACCEPTANCE.md). It includes deterministic Core checks, dsh profile initialization, the restricted `dataagent-query` preset, real MCP tool-call verification, LLM self-fix validation, and reject/allow-once HITL tests.
+### Windows: bootstrap local DeepSeek Harness
+
+The repository does **not** treat `dsh/profile/cordis.patch.yml` as an automatically existing dsh profile. A custom `dataagent` profile must first be created under `$DSH_HOME`. Use the repository bootstrap script instead of launching `--profile dataagent` directly on a fresh machine:
+
+```powershell
+.\scripts\setup_dataagent.ps1
+```
+
+The script is idempotent. It installs pinned dependencies, creates the custom profile when missing, installs the local Guard bundle, applies the repository profile patch, and validates the effective dsh configuration.
+
+Then provide your DeepSeek official API key:
+
+```powershell
+$env:DEEPSEEK_API_KEY = "sk-..."
+```
+
+Start Agent3 MCP in another terminal:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+$env:AGENT3_MCP_POC_MODE = "1"
+python -m agent3.adapters.mcp.server
+```
+
+Start the local Harness:
+
+```powershell
+.\scripts\start_dataagent.ps1
+```
+
+The deployment shape is:
+
+```text
+Local browser
+  -> Local DeepSeek Harness
+  -> DeepSeek official API
+  -> Local Agent3 MCP
+  -> Local Agent3 Core
+```
+
+For the full **Windows local acceptance with a real LLM + MCP + Human-in-the-Loop**, follow [`docs/LOCAL_ACCEPTANCE.md`](docs/LOCAL_ACCEPTANCE.md).
 
 ## DeepSeek Harness
 
-The repository pins `@deepseek-ai/dsh` to `0.1.6-alpha.2` in `dsh/package.json`. The deployment profile disables DeepSeek session upload, telemetry, web search/fetch and the web tool, points inference at an internal OpenAI-compatible service, connects Agent3 over streamable HTTP MCP, and loads the local guard plugin.
+The repository pins `@deepseek-ai/dsh` to `0.1.6-alpha.2` in `dsh/package.json`. The local Harness uses its native `deepseek-official` provider with `DEEPSEEK_API_KEY`; no local model server, `LOCAL_LLM_KEY`, or `127.0.0.1:8100` endpoint is required. The DataAgent profile disables DeepSeek session upload, telemetry, web search/fetch and the web tool, connects Agent3 over streamable HTTP MCP, and loads the local guard plugin.
 
-Before deployment run `dsh --profile dataagent --dump-config`, then verify **zero public egress** with an outbound firewall log or packet capture. Configuration is not accepted as proof of isolation.
+Before deployment run `scripts/setup_dataagent.ps1` and inspect the generated effective config. Configuration is not accepted as proof of production network isolation; deployment firewalls still own that boundary.
 
 ## Repository map
 
@@ -111,6 +151,8 @@ guard-plugin/               dsh Cordis guard/audit glue
 semantic_models/            Git source of truth for semantic definitions
 benchmarks/                  public synthetic evaluation seeds
 tests/                       release and architecture gates
+scripts/setup_dataagent.ps1  idempotent local profile bootstrap
+scripts/start_dataagent.ps1  local Harness launcher
 ```
 
 See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/MIGRATION.md`, and `docs/LOCAL_ACCEPTANCE.md` for design boundaries, migration status, and local acceptance.
