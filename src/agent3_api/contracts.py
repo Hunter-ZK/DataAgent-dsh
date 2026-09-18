@@ -9,6 +9,7 @@ class MessageRoute(StrEnum):
     PENDING = "pending"
     QUERY_ENGINE = "query_engine"
     DSH = "dsh"
+    REFUSED = "refused"
 
 
 class AgentEventType(StrEnum):
@@ -20,6 +21,7 @@ class AgentEventType(StrEnum):
     CAVEAT = "caveat"
     CLARIFICATION_NEEDED = "clarification_needed"
     SCOPE_NOTICE = "scope_notice"
+    REFUSAL = "refusal"
     ERROR = "error"
     DONE = "done"
 
