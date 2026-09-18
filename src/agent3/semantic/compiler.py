@@ -43,7 +43,8 @@ def _filter_sql(item: MandatoryFilter) -> str:
 
 
 class SemanticCompiler:
-    """V1 deterministic compiler for one metric + dimensions + time snapshot."""
+    """V1 deterministic compiler for one metric + dimensions + snapshot time."""
+
     def __init__(self, registry: SemanticRegistry, metadata: MetadataProvider) -> None:
         self._registry = registry
         self._metadata = metadata
@@ -57,23 +58,34 @@ class SemanticCompiler:
             raise SemanticCompileError(f"unknown source entity: {metric.source_entity}")
         if table.column(metric.measure) is None:
             raise SemanticCompileError(f"unknown measure: {metric.measure}")
+        if table.column(metric.time_field) is None and ir.time_values:
+            raise SemanticCompileError(f"unknown time field: {metric.time_field}")
+
         for dim in ir.dimensions:
             if metric.valid_dimensions and dim not in metric.valid_dimensions:
                 raise SemanticCompileError(f"dimension not valid for metric: {dim}")
             if table.column(dim) is None:
                 raise SemanticCompileError(f"unknown dimension: {dim}")
-        if metric.additivity_time is Additivity.NON_ADDITIVE and len(ir.time_values) > 1:
-            raise SemanticCompileError("non-additive metric cannot aggregate across multiple snapshots")
+
+        # A snapshot/non-additive metric must never silently scan and SUM across
+        # all snapshots. V1 accepts exactly one explicit snapshot for the fast
+        # path; time-series comparison is routed to the exploratory path until a
+        # dedicated time-series IR is introduced.
+        if metric.additivity_time is Additivity.NON_ADDITIVE:
+            if not ir.time_values:
+                raise SemanticCompileError("non-additive metric requires an explicit snapshot date")
+            if len(ir.time_values) > 1:
+                raise SemanticCompileError("non-additive metric cannot aggregate across multiple snapshots")
 
         dims = [_ident(dim) for dim in ir.dimensions]
         select = [*dims, f"{metric.aggregation.upper()}({_ident(metric.measure)}) AS {_ident(metric.id)}"]
         filters = [*metric.mandatory_filters, *ir.filters]
         where_parts = [_filter_sql(item) for item in filters]
         if len(ir.time_values) == 1:
-            where_parts.append(f"dt = {_literal(ir.time_values[0])}")
+            where_parts.append(f"{_ident(metric.time_field)} = {_literal(ir.time_values[0])}")
         elif len(ir.time_values) > 1:
             values = ", ".join(_literal(v) for v in ir.time_values)
-            where_parts.append(f"dt IN ({values})")
+            where_parts.append(f"{_ident(metric.time_field)} IN ({values})")
 
         sql = f"SELECT {', '.join(select)} FROM {_table(metric.source_entity)}"
         if where_parts:
