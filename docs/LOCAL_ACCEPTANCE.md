@@ -3,7 +3,7 @@
 本文用于对 DataAgent-dsh V1 做一次**真实本地验收**。正式验收必须同时满足：
 
 1. Python Core 确定性门禁可独立运行；
-2. DeepSeek Harness 使用真实 LLM，而不是 Mock；
+2. DeepSeek Harness 在本机运行并调用 DeepSeek 官方 API，而不是 Mock / 本地模型；
 3. Agent 必须通过 Agent3 MCP 工具获取 SQL 事实；
 4. `submit_ddl` 必须触发 Human-in-the-Loop 审批；
 5. 即使人工批准，V1 也不得真正执行生产 DDL。
@@ -12,9 +12,9 @@
 
 ## 1. 环境基线
 
-已在 CI 验证：
+CI 验证基线：
 
-- Python 3.14（CI 当前为 3.14.7）
+- Python 3.14
 - Node.js 24
 - pnpm 11.7.0
 - `@deepseek-ai/dsh` 0.1.6-alpha.2
@@ -29,17 +29,9 @@ py -3.14 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -e ".[all]"
-
-npm install --global pnpm@11.7.0
-Push-Location .\dsh
-npm ci
-Pop-Location
-
-Push-Location .\guard-plugin
-npm ci
-npm run build
-Pop-Location
 ```
+
+Node / dsh / Guard 依赖不需要你手工逐个安装；第 3 节的一键初始化脚本会执行 pinned `npm ci` 和 Guard build。
 
 ## 2. 先验收 Python Core
 
@@ -82,83 +74,83 @@ agent3 validate "SELECT ..." --metric loan_balance
 | `loan_balance` 缺强制口径 | `MISSING_MANDATORY_FILTER` |
 | `loan_balance` 跨多个快照日聚合 | `NON_ADDITIVE_OVER_TIME` |
 
-## 3. 准备真实 LLM
+## 3. 一键初始化本地 DeepSeek Harness profile
 
-DataAgent profile 默认连接一个本机/内网 OpenAI-compatible 推理服务：
+### 为什么你会看到 `profile dataagent does not exist`
 
-```text
-http://127.0.0.1:8100/v1
-model id: deepseek-v3-local
-```
+`dsh/profile/cordis.patch.yml` 是**仓库里的 profile patch 模板**，它本身不会自动在 Harness Home 中创建一个名为 `dataagent` 的 profile。
 
-你必须先确保这里有**真实模型服务**。V1 验收不接受 Mock LLM。
-
-如果你的推理服务地址或模型 ID 不同，修改：
+DeepSeek Harness 的自定义 profile 实际位于：
 
 ```text
-dsh/profile/cordis.patch.yml
+$DSH_HOME/profiles/dataagent
 ```
 
-中的：
-
-- `baseURL`
-- `models[].id`
-- `agent-default-model.model`
-
-然后设置凭据。即使本地推理服务不校验 key，也建议保留一个占位值：
+首次使用必须先从 shipped `web` profile 初始化。为避免漏步骤，本仓库提供幂等初始化脚本：
 
 ```powershell
-$env:LOCAL_LLM_KEY = "local-placeholder"
+.\scripts\setup_dataagent.ps1
 ```
 
-## 4. 初始化 DataAgent dsh profile
+默认 `DSH_HOME`：
 
-使用独立的 Harness Home，避免污染你已有的 dsh 配置：
+```text
+%LOCALAPPDATA%\DataAgent-dsh\dsh-home
+```
+
+脚本会自动完成：
+
+1. `dsh/npm ci`；
+2. `guard-plugin/npm ci` + build；
+3. 若 `dataagent` profile 不存在，则执行 `--from-default-profile web` 创建；
+4. 安装本地 `@hunter-zk/agent3-guard` bundle；
+5. 复制仓库 `dsh/profile/cordis.patch.yml`；
+6. 执行 `--dump-config` 检查 `deepseek-official`、MCP、Guard、`dataagent-query`；
+7. 拒绝残留的旧本地模型配置（`127.0.0.1:8100` / `LOCAL_LLM_KEY` / `deepseek-v3-local`）。
+
+如果你之前留下了损坏或半初始化的本地 profile，并且确认可以重建，可以显式执行：
 
 ```powershell
-$env:DSH_HOME = "$env:LOCALAPPDATA\DataAgent-dsh\dsh-home"
-$env:DSH_TELEMETRY_MODE = "DISABLED"
+.\scripts\setup_dataagent.ps1 -ResetProfile
 ```
 
-第一次初始化 profile：
+`-ResetProfile` 会删除**本机** `$DSH_HOME/profiles/dataagent` 后重建，不会修改 Git 仓库。
+
+## 4. 配置真实 DeepSeek API
+
+当前正式验收拓扑是：
+
+```text
+本地浏览器
+  -> 本地 DeepSeek Harness
+  -> DeepSeek 官方 API
+  -> 本地 Agent3 MCP
+  -> 本地 Agent3 Core
+```
+
+**不需要** Ollama、vLLM、LM Studio、本地 DeepSeek 权重、`127.0.0.1:8100` 或 `LOCAL_LLM_KEY`。
+
+在启动 Harness 的同一个 PowerShell 窗口设置：
 
 ```powershell
-.\dsh\node_modules\.bin\dsh.cmd --profile dataagent --from-default-profile web --dump-config > "$env:TEMP\dataagent-initial-config.txt"
+$env:DEEPSEEK_API_KEY = "sk-你的真实DeepSeekKey"
 ```
 
-安装本地 Guard bundle：
+不要把 key 写入仓库或提交到 Git。
 
-```powershell
-.\dsh\node_modules\.bin\dsh.cmd plugin --profile dataagent add "$PWD\guard-plugin"
+DataAgent profile 使用 Harness 原生 provider：
+
+```text
+provider: deepseek-official
+model: deepseek-flash
+credential ref: DEEPSEEK_API_KEY
 ```
 
-覆盖 DataAgent profile：
-
-```powershell
-Copy-Item .\dsh\profile\cordis.patch.yml "$env:DSH_HOME\profiles\dataagent\cordis.patch.yml" -Force
-```
-
-检查最终合成配置：
-
-```powershell
-.\dsh\node_modules\.bin\dsh.cmd --profile dataagent --dump-config `
-  1> "$env:TEMP\dataagent-effective-config.txt" `
-  2> "$env:TEMP\dataagent-config.err"
-
-Get-Content "$env:TEMP\dataagent-config.err"
-```
-
-`dataagent-config.err` 不应出现：
-
-- `unmatched`
-- `not found`
-- `failed to resolve`
-
-当前 `dataagent-query` preset 是仓库自带的受限业务问数模式，刻意不暴露 bash、pwsh、文件写入和插件管理工具。
+也可以先启动 Harness，再在 Web 的 `Settings > Models` 中保存 DeepSeek 凭据；正式验收只要求实际模型调用成功，不要求一定使用环境变量持久化。
 
 ## 5. 启动 Agent3 MCP
 
-打开第二个 PowerShell 窗口，同样进入仓库、激活虚拟环境：
+打开第二个 PowerShell 窗口，进入仓库并激活 Python 环境：
 
 ```powershell
 cd <你的 DataAgent-dsh 路径>
@@ -183,18 +175,19 @@ Test-NetConnection 127.0.0.1 -Port 8900
 
 > `AGENT3_MCP_POC_MODE=1` 使用静态 PoC 身份，仅用于隔离环境验收，不能作为生产身份方案。
 
-## 6. 启动 DeepSeek Harness Web
+## 6. 启动本地 DeepSeek Harness
 
-确保：
-
-- 真实 LLM 服务已运行；
-- Agent3 MCP 已运行；
-- `LOCAL_LLM_KEY`、`DSH_HOME`、`DSH_TELEMETRY_MODE` 已设置。
-
-从**仓库根目录**启动：
+回到用于 Harness 的 PowerShell，设置 API Key 后直接使用仓库启动脚本：
 
 ```powershell
-.\dsh\node_modules\.bin\dsh.cmd --profile dataagent
+$env:DEEPSEEK_API_KEY = "sk-你的真实DeepSeekKey"
+.\scripts\start_dataagent.ps1
+```
+
+如果 profile 还没初始化，`start_dataagent.ps1` 会先自动调用 `setup_dataagent.ps1`，因此不会再出现首次启动时的：
+
+```text
+profile dataagent does not exist
 ```
 
 默认 Web 地址：
@@ -207,6 +200,15 @@ http://127.0.0.1:3080
 
 ```text
 dataagent-query
+```
+
+如果你想手工启动而不是使用脚本，必须先完成第 3 节初始化，然后：
+
+```powershell
+$env:DSH_HOME = "$env:LOCALAPPDATA\DataAgent-dsh\dsh-home"
+$env:DSH_TELEMETRY_MODE = "DISABLED"
+$env:DEEPSEEK_API_KEY = "sk-..."
+.\dsh\node_modules\.bin\dsh.cmd --profile dataagent
 ```
 
 ## 7. 验收真实 LLM + MCP SQL 闭环
@@ -244,8 +246,8 @@ mcp__agent3__compile_query
 这一步验证的是：
 
 ```text
-真实 LLM
-  -> dsh Agent Loop
+DeepSeek 官方真实 LLM
+  -> 本地 dsh Agent Loop
   -> Agent3 MCP
   -> Agent3 Core deterministic evidence
   -> LLM 基于结构化问题自修复
@@ -296,7 +298,7 @@ CREATE TABLE dw.dataagent_hitl_probe (
 
 3. 数据库中不会创建任何表。
 
-这个结果是刻意设计的：它证明了完整 HITL 链路，同时证明 V1 的人工批准**不能越过生产执行边界**。
+这个结果是刻意设计的：它证明完整 HITL 链路，同时证明 V1 的人工批准**不能越过生产执行边界**。
 
 ## 9. 如何判定本地验收通过
 
@@ -305,7 +307,8 @@ CREATE TABLE dw.dataagent_hitl_probe (
 - Python pytest 全绿；
 - Architecture Boundary Gate 通过；
 - Stage-0 result-set evaluation 通过；
-- dsh Web 使用真实模型产生回复；
+- `setup_dataagent.ps1` 正常创建并验证 `dataagent` profile；
+- dsh Web 实际调用 DeepSeek 官方 API 产生回复；
 - 会话里可以看到实际 Agent3 MCP tool call；
 - 你自己的 SQL 经过 `validate_sql`；
 - SQL 有问题时，模型基于结构化错误做修改并重新验证；
