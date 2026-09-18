@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   python-core:
@@ -38,9 +38,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install guard dependencies
+      - name: Install guard dependencies from lockfile
         working-directory: guard-plugin
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build guard plugin
         working-directory: guard-plugin
         run: npm run build
@@ -55,38 +55,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install pinned dsh
+      - name: Install pinned dsh from lockfile
         working-directory: dsh
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Verify dsh CLI
         working-directory: dsh
         run: |
           npm list @deepseek-ai/dsh
           npx dsh --version
-
-  freeze-lockfiles:
-    if: github.ref == 'refs/heads/migration/v1-dsh'
-    needs: [guard-plugin, dsh-runtime-smoke]
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: migration/v1-dsh
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Generate exact dependency lockfiles
-        run: |
-          (cd guard-plugin && npm install --package-lock-only --ignore-scripts --no-audit --no-fund)
-          (cd dsh && npm install --package-lock-only --ignore-scripts --no-audit --no-fund)
-      - name: Commit lockfiles
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add guard-plugin/package-lock.json dsh/package-lock.json
-          if git diff --cached --quiet; then
-            echo "Lockfiles already frozen"
-          else
-            git commit -m "build: freeze Node dependency lockfiles"
-            git push origin HEAD:migration/v1-dsh
-          fi
