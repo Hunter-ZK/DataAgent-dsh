@@ -1,0 +1,19 @@
+metrics:
+  - id: loan_balance
+    name: 贷款余额
+    aliases: [余额, loan balance]
+    aggregation: sum
+    measure: balance_amt
+    source_entity: dw.dwd_loan_snapshot
+    mandatory_filters:
+      - field: status
+        op: ne
+        value: cancelled
+    grain: [dt, org_id, product_id]
+    additivity:
+      time: non_additive
+      org: additive
+      product: additive
+    valid_dimensions: [org_id, region_code, product_id]
+    owner: 信贷数仓组
+    caveats: 不含已取消记录；余额为快照指标，不允许跨日期求和。
