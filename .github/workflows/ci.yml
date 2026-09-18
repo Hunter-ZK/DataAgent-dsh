@@ -79,6 +79,26 @@ jobs:
           npm install --global pnpm@11.7.0
           (cd dsh && npm ci --no-audit --no-fund)
           (cd guard-plugin && npm ci --no-audit --no-fund && npm run build)
+      - name: Verify repository query preset with dsh discovery
+        working-directory: dsh
+        run: |
+          node --input-type=module <<'NODE'
+          import { scanRoot } from '@deepseek-ai/dsh-agent-presets'
+          import { resolve } from 'node:path'
+          import { pathToFileURL } from 'node:url'
+
+          const presetRoot = resolve(process.cwd(), 'presets')
+          const harnessBase = pathToFileURL(resolve(process.cwd(), 'node_modules', '@deepseek-ai', 'dsh-agent-presets') + '/')
+          const presets = await scanRoot({ path: presetRoot, trust: 'system' }, harnessBase.href)
+          const query = presets.find((item) => item.id === 'dataagent-query')
+          if (!query) throw new Error('dataagent-query preset was not discovered')
+          if (query.broken) throw new Error(`dataagent-query preset is broken: ${query.broken}`)
+          console.log(JSON.stringify(query, null, 2))
+          NODE
+          if grep -Eq "@deepseek-ai/dsh-tool-(bash|pwsh|fs)|str-replace|plugin-manager" presets/dataagent-query/agent.cordis.yml; then
+            echo "restricted dataagent-query preset exposes a forbidden developer tool" >&2
+            exit 1
+          fi
       - name: Initialize custom dsh profile without boot
         env:
           DSH_HOME: ${{ runner.temp }}/dsh-home
@@ -102,6 +122,8 @@ jobs:
           grep -q "session-log-deepseek" "${RUNNER_TEMP}/dataagent-config.txt"
           grep -q "disabled: true" "${RUNNER_TEMP}/dataagent-config.txt"
           grep -q "deepseek-v3-local" "${RUNNER_TEMP}/dataagent-config.txt"
+          grep -q "dataagent-query" "${RUNNER_TEMP}/dataagent-config.txt"
+          grep -q "./dsh/presets" "${RUNNER_TEMP}/dataagent-config.txt"
           if grep -Eqi "unmatched|not found|failed to resolve" "${RUNNER_TEMP}/dataagent-config.err"; then
             echo "DataAgent profile contains unresolved patch targets" >&2
             exit 1
