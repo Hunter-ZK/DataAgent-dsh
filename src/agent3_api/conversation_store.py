@@ -18,13 +18,12 @@ class ConversationRecord:
 class ConversationStore(Protocol):
     def create(self, principal: str, *, title: str | None = None) -> ConversationRecord: ...
     def get(self, conversation_id: str) -> ConversationRecord | None: ...
+    def list_for_principal(self, principal: str, *, limit: int = 100) -> tuple[ConversationRecord, ...]: ...
     def append_message(self, message: ConversationMessage) -> None: ...
     def messages(self, conversation_id: str) -> tuple[ConversationMessage, ...]: ...
 
 
 class InMemoryConversationStore:
-    """Stage-A canonical conversation owner; PostgreSQL replaces this in Stage C."""
-
     def __init__(self) -> None:
         self._conversations: dict[str, ConversationRecord] = {}
         self._messages: list[ConversationMessage] = []
@@ -39,6 +38,11 @@ class InMemoryConversationStore:
     def get(self, conversation_id: str) -> ConversationRecord | None:
         with self._lock:
             return self._conversations.get(conversation_id)
+
+    def list_for_principal(self, principal: str, *, limit: int = 100) -> tuple[ConversationRecord, ...]:
+        with self._lock:
+            matches = [item for item in self._conversations.values() if item.principal == principal]
+        return tuple(reversed(matches[-max(0, limit):]))
 
     def append_message(self, message: ConversationMessage) -> None:
         with self._lock:
