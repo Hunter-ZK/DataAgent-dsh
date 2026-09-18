@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dataagent-dsh"
-version = "0.1.0"
-description = "Harness-agnostic DataAgent core with DeepSeek Harness adapters"
+version = "0.2.0"
+description = "Harness-agnostic DataAgent core with a local DeepSeek Harness platform layer"
 requires-python = ">=3.14,<3.15"
 dependencies = [
   "sqlglot>=28.0.0,<29.0.0",
@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 http = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
 mcp = ["mcp>=1.13,<2"]
+platform = ["deepseek-harness-sdk==0.1.5rc1", "fastapi>=0.115,<1", "uvicorn>=0.30,<1"]
 dev = ["pytest>=9,<10"]
 all = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "mcp>=1.13,<2", "pytest>=9,<10"]
 
