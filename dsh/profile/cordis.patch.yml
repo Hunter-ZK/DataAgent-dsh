@@ -41,10 +41,10 @@
         reconnect:
           enabled: true
           maxAttempts: 20
-    - id: agent3-guard
-      name: '@hunter-zk/agent3-guard'
-      config:
-        auditEndpoint: http://127.0.0.1:8000/audit
+
+# agent3-guard is intentionally NOT inserted here. Installing the local
+# @hunter-zk/agent3-guard bundle adds its own row from guard-plugin/cordis.patch.yml.
+# Keeping one owner prevents duplicate plugin rows and preserves bundle portability.
 
 - patch:
     - id: permission-presets
