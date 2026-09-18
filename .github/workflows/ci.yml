@@ -2,7 +2,7 @@ name: DataAgent V1 Gate
 
 on:
   push:
-    branches: [main, "migration/**", "fix/**"]
+    branches: [main, "migration/**", "fix/**", "upgrade/**"]
   pull_request:
     branches: [main]
 
@@ -30,6 +30,46 @@ jobs:
         run: python -m pytest
       - name: Stage-0 evaluation smoke
         run: python examples/stage0_eval.py
+
+  sdk-platform-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - name: Install pinned SDK platform extra
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[platform]'
+      - name: Verify SDK/runtime contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from deepseek_harness import DeepSeekHarness, DeepSeekHarnessConfig
+          from agent3_api.harness_runtime import HarnessRuntimeConfig
+
+          sdk = DeepSeekHarnessConfig(
+              dsh_home=str(Path('/tmp/dataagent-sdk-home')),
+              cwd=str(Path.cwd()),
+              provider='deepseek-official',
+              model='deepseek-v4-flash',
+              request_timeout_seconds=180,
+          )
+          assert sdk.profile == 'sdk'
+          cfg = HarnessRuntimeConfig(
+              root=Path('/tmp/homes'),
+              workspace_root=Path('/tmp/workspaces'),
+              patch_file=Path('dsh/sdk/query.patch.yml'),
+          )
+          assert cfg.patch_file.exists()
+          assert DeepSeekHarness is not None
+          PY
+          if grep -Eq "@deepseek-ai/dsh-tool-(bash|pwsh|fs)|plugin-manager" dsh/presets/dataagent-query-sdk/agent.cordis.yml; then
+            echo "restricted SDK query preset exposes a forbidden developer tool" >&2
+            exit 1
+          fi
 
   guard-plugin:
     runs-on: ubuntu-24.04
@@ -95,7 +135,7 @@ jobs:
           if (-not (Test-Path (Join-Path $staleProfile "package.json"))) {
             throw "stale profile recovery did not create a valid package.json"
           }
-      - name: Verify repository query preset with dsh discovery
+      - name: Verify repository query presets with dsh discovery
         working-directory: dsh
         run: |
           node --input-type=module <<'NODE'
@@ -106,15 +146,18 @@ jobs:
           const presetRoot = resolve(process.cwd(), 'presets')
           const harnessBase = pathToFileURL(resolve(process.cwd(), 'node_modules', '@deepseek-ai', 'dsh-agent-presets') + '/')
           const presets = await scanRoot({ path: presetRoot, trust: 'system' }, harnessBase.href)
-          const query = presets.find((item) => item.id === 'dataagent-query')
-          if (!query) throw new Error('dataagent-query preset was not discovered')
-          if (query.broken) throw new Error(`dataagent-query preset is broken: ${query.broken}`)
-          console.log(JSON.stringify(query, null, 2))
+          for (const id of ['dataagent-query', 'dataagent-query-sdk']) {
+            const preset = presets.find((item) => item.id === id)
+            if (!preset) throw new Error(`${id} preset was not discovered`)
+            if (preset.broken) throw new Error(`${id} preset is broken: ${preset.broken}`)
+          }
           NODE
-          if grep -Eq "@deepseek-ai/dsh-tool-(bash|pwsh|fs)|str-replace|plugin-manager" presets/dataagent-query/agent.cordis.yml; then
-            echo "restricted dataagent-query preset exposes a forbidden developer tool" >&2
-            exit 1
-          fi
+          for preset in presets/dataagent-query/agent.cordis.yml presets/dataagent-query-sdk/agent.cordis.yml; do
+            if grep -Eq "@deepseek-ai/dsh-tool-(bash|pwsh|fs)|str-replace|plugin-manager" "$preset"; then
+              echo "restricted query preset exposes a forbidden developer tool: $preset" >&2
+              exit 1
+            fi
+          done
       - name: Validate composed DataAgent profile
         env:
           DSH_HOME: ${{ runner.temp }}/dsh-home
