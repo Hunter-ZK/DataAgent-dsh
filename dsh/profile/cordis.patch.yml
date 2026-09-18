@@ -1,9 +1,12 @@
 # DataAgent dsh profile for @deepseek-ai/dsh 0.1.6-alpha.2.
 # Existing rows are patched directly by id; only new rows use `insert`.
 # Run dsh from the repository root so ./dsh/presets resolves deterministically.
-# Always verify the composed result with `dsh --profile dataagent --dump-config`.
+# The custom `dataagent` profile itself must first be initialized under DSH_HOME;
+# use scripts/setup_dataagent.ps1 rather than launching a missing profile directly.
 
-# Disable public egress surfaces for the intended intranet deployment.
+# Disable public egress surfaces that are unrelated to model inference.
+# DeepSeek official model inference remains enabled through the native
+# @deepseek-ai/dsh-llm-deepseek adapter.
 - id: session-log-deepseek
   disabled: true
 - id: session-telemetry-otel
@@ -15,23 +18,17 @@
 - id: tool-web
   disabled: true
 
-# Point dsh at an OpenAI-compatible internal inference endpoint.
-- id: llm-pi-ai
+# Use DeepSeek's official API from the locally running Harness.
+# The API key is resolved per request from DEEPSEEK_API_KEY (or the Harness
+# credential store if configured through the Web Models settings page).
+- id: llm-deepseek
   config:
-    providers:
-      local:
-        displayName: 内网推理服务
-        api: openai-completions
-        baseURL: http://127.0.0.1:8100/v1
-        apiKeyEnv: LOCAL_LLM_KEY
-        models:
-          - id: deepseek-v3-local
-            name: DeepSeek V3 Local
-            contextWindow: 131072
+    apiKeyEnv: DEEPSEEK_API_KEY
+
 - id: agent-default-model
   config:
-    provider: local
-    model: deepseek-v3-local
+    provider: deepseek-official
+    model: deepseek-flash
 
 # Agent3 MCP is an adapter; business logic remains in Python Core.
 - insert:

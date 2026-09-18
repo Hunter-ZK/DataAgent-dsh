@@ -68,17 +68,22 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       DSH_TELEMETRY_MODE: DISABLED
-      LOCAL_LLM_KEY: ci-placeholder
+      DEEPSEEK_API_KEY: ci-placeholder
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Install deterministic runtime tooling
+      - name: Install pnpm used by dsh plugin manager
+        run: npm install --global pnpm@11.7.0
+      - name: Bootstrap DataAgent profile through repository user path
+        shell: pwsh
         run: |
-          npm install --global pnpm@11.7.0
-          (cd dsh && npm ci --no-audit --no-fund)
-          (cd guard-plugin && npm ci --no-audit --no-fund && npm run build)
+          ./scripts/setup_dataagent.ps1 -DshHome "${{ runner.temp }}/dsh-home"
+      - name: Re-run bootstrap to prove idempotence
+        shell: pwsh
+        run: |
+          ./scripts/setup_dataagent.ps1 -DshHome "${{ runner.temp }}/dsh-home" -SkipDependencyInstall
       - name: Verify repository query preset with dsh discovery
         working-directory: dsh
         run: |
@@ -99,17 +104,6 @@ jobs:
             echo "restricted dataagent-query preset exposes a forbidden developer tool" >&2
             exit 1
           fi
-      - name: Initialize custom dsh profile without boot
-        env:
-          DSH_HOME: ${{ runner.temp }}/dsh-home
-        run: |
-          ./dsh/node_modules/.bin/dsh --profile dataagent --from-default-profile web --dump-config > "${RUNNER_TEMP}/initial-config.txt"
-      - name: Install and enable local Agent3 guard bundle
-        env:
-          DSH_HOME: ${{ runner.temp }}/dsh-home
-        run: |
-          ./dsh/node_modules/.bin/dsh plugin --profile dataagent add "${GITHUB_WORKSPACE}/guard-plugin"
-          cp dsh/profile/cordis.patch.yml "${DSH_HOME}/profiles/dataagent/cordis.patch.yml"
       - name: Validate composed DataAgent profile
         env:
           DSH_HOME: ${{ runner.temp }}/dsh-home
@@ -121,10 +115,16 @@ jobs:
           grep -q "mcp-agent3" "${RUNNER_TEMP}/dataagent-config.txt"
           grep -q "session-log-deepseek" "${RUNNER_TEMP}/dataagent-config.txt"
           grep -q "disabled: true" "${RUNNER_TEMP}/dataagent-config.txt"
-          grep -q "deepseek-v3-local" "${RUNNER_TEMP}/dataagent-config.txt"
+          grep -q "deepseek-official" "${RUNNER_TEMP}/dataagent-config.txt"
+          grep -q "deepseek-flash" "${RUNNER_TEMP}/dataagent-config.txt"
+          grep -q "DEEPSEEK_API_KEY" "${RUNNER_TEMP}/dataagent-config.txt"
           grep -q "dataagent-query" "${RUNNER_TEMP}/dataagent-config.txt"
           grep -q "./dsh/presets" "${RUNNER_TEMP}/dataagent-config.txt"
-          if grep -Eqi "unmatched|not found|failed to resolve" "${RUNNER_TEMP}/dataagent-config.err"; then
-            echo "DataAgent profile contains unresolved patch targets" >&2
+          if grep -Eq "127\.0\.0\.1:8100|deepseek-v3-local|LOCAL_LLM_KEY" "${RUNNER_TEMP}/dataagent-config.txt"; then
+            echo "DataAgent profile still contains retired local-LLM configuration" >&2
+            exit 1
+          fi
+          if grep -Eqi "unmatched|not found|failed to resolve|profile .* does not exist" "${RUNNER_TEMP}/dataagent-config.err"; then
+            echo "DataAgent profile contains unresolved patch targets or bootstrap failure" >&2
             exit 1
           fi
