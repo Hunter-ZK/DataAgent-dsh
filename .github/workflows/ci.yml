@@ -84,6 +84,17 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/setup_dataagent.ps1 -DshHome "${{ runner.temp }}/dsh-home" -SkipDependencyInstall
+      - name: Recover automatically from stale profile directory
+        shell: pwsh
+        run: |
+          $staleHome = "${{ runner.temp }}/dsh-home-stale"
+          $staleProfile = Join-Path $staleHome "profiles/dataagent"
+          New-Item -ItemType Directory -Force -Path $staleProfile | Out-Null
+          Set-Content -Path (Join-Path $staleProfile "leftover.txt") -Value "simulated interrupted bootstrap"
+          ./scripts/setup_dataagent.ps1 -DshHome $staleHome -SkipDependencyInstall
+          if (-not (Test-Path (Join-Path $staleProfile "package.json"))) {
+            throw "stale profile recovery did not create a valid package.json"
+          }
       - name: Verify repository query preset with dsh discovery
         working-directory: dsh
         run: |
