@@ -1,0 +1,3 @@
+name: DataAgent 问数模式
+description: 受限业务问数 Agent，仅使用 Agent3 MCP、Skills 与人工澄清能力，不暴露 Shell 或文件写入工具。
+order: 1
