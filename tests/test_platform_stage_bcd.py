@@ -13,6 +13,7 @@ from agent3.semantic.models import QueryIR
 from agent3.services.factory import build_demo_core
 from agent3.services.query_engine import QueryEngineService
 from agent3_api.auth import LocalDevIdentityResolver, TrustedProxyIdentityResolver
+from agent3_api.main import _identity_from_env
 from agent3_api.persistence import POSTGRES_SCHEMA
 
 
@@ -58,6 +59,31 @@ def test_local_dev_identity_ignores_browser_asserted_headers() -> None:
     assert authz.roles == ("analyst",)
     assert authz.data_scopes[0].values == ("4403",)
     assert authz.attributes["auth_mode"] == "local-dev"
+
+
+def test_dev_auth_composition_requires_loopback(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT3_DEV_AUTH", "1")
+    monkeypatch.setenv("AGENT3_HOST", "0.0.0.0")
+    with pytest.raises(RuntimeError, match="loopback"):
+        _identity_from_env()
+
+
+def test_production_identity_requires_proxy_secret(monkeypatch) -> None:
+    monkeypatch.delenv("AGENT3_DEV_AUTH", raising=False)
+    monkeypatch.delenv("AGENT3_PROXY_SHARED_SECRET", raising=False)
+    with pytest.raises(RuntimeError, match="AGENT3_PROXY_SHARED_SECRET"):
+        _identity_from_env()
+
+
+def test_dev_auth_composition_builds_host_owned_identity(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT3_DEV_AUTH", "1")
+    monkeypatch.setenv("AGENT3_HOST", "127.0.0.1")
+    monkeypatch.setenv("AGENT3_DEV_PRINCIPAL", "local-test")
+    monkeypatch.setenv("AGENT3_DEV_DATA_SCOPES", "region_code=4403")
+    resolver = _identity_from_env()
+    authz = resolver.resolve({"x-principal": "browser-injected"})
+    assert authz.principal == "local-test"
+    assert authz.data_scopes[0].values == ("4403",)
 
 
 def test_policy_compiler_intersects_identity_and_central_policy() -> None:
