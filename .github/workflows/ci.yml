@@ -24,6 +24,18 @@ jobs:
           python -m pip install -e '.[all]'
       - name: Compile
         run: python -m compileall -q src tests examples scripts
+      - name: Validate PowerShell launchers
+        shell: pwsh
+        run: |
+          foreach ($file in @("scripts/start_platform.ps1", "scripts/setup_dataagent.ps1", "scripts/start_dataagent.ps1")) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error "$file: $($_.Message)" }
+              throw "PowerShell launcher syntax validation failed"
+            }
+          }
       - name: Architecture boundaries
         run: python scripts/check_architecture.py
       - name: Tests
