@@ -12,7 +12,7 @@ from agent3.query.interpreter import DeterministicQuestionInterpreter
 from agent3.semantic.models import QueryIR
 from agent3.services.factory import build_demo_core
 from agent3.services.query_engine import QueryEngineService
-from agent3_api.auth import TrustedProxyIdentityResolver
+from agent3_api.auth import LocalDevIdentityResolver, TrustedProxyIdentityResolver
 from agent3_api.persistence import POSTGRES_SCHEMA
 
 
@@ -39,6 +39,25 @@ def test_trusted_proxy_identity_is_fail_closed() -> None:
     assert authz.principal == "alice"
     assert authz.data_scopes[0].values == ("4403", "4401")
     assert authz.attributes["scope_version"] == "18"
+    assert authz.attributes["auth_mode"] == "trusted-proxy"
+
+
+def test_local_dev_identity_ignores_browser_asserted_headers() -> None:
+    resolver = LocalDevIdentityResolver(
+        principal="local-pilot",
+        roles=("analyst",),
+        data_scopes=(DataScope("region_code", ("4403",)),),
+        scope_version="local-1",
+    )
+    authz = resolver.resolve({
+        "x-principal": "mallory",
+        "x-roles": "admin",
+        "x-data-scopes": "region_code=9999",
+    })
+    assert authz.principal == "local-pilot"
+    assert authz.roles == ("analyst",)
+    assert authz.data_scopes[0].values == ("4403",)
+    assert authz.attributes["auth_mode"] == "local-dev"
 
 
 def test_policy_compiler_intersects_identity_and_central_policy() -> None:
