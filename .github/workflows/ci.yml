@@ -60,6 +60,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from deepseek_harness import DeepSeekHarness, DeepSeekHarnessConfig
+          from deepseek_harness_runtime import bundled_runtime_path
           from agent3_api.harness_runtime import HarnessRuntimeConfig
 
           sdk = DeepSeekHarnessConfig(
@@ -70,6 +71,7 @@ jobs:
               request_timeout_seconds=180,
           )
           assert sdk.profile == 'sdk'
+          assert Path(bundled_runtime_path()).exists()
           cfg = HarnessRuntimeConfig(
               root=Path('/tmp/homes'),
               workspace_root=Path('/tmp/workspaces'),
@@ -82,6 +84,59 @@ jobs:
             echo "restricted SDK query preset exposes a forbidden developer tool" >&2
             exit 1
           fi
+
+  windows-sdk-mcp-boot:
+    runs-on: windows-2022
+    env:
+      AGENT3_MCP_POC_MODE: "1"
+      DEEPSEEK_API_KEY: ci-placeholder
+      DSH_TELEMETRY_MODE: DISABLED
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: pip
+      - name: Install platform and MCP dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[platform,mcp]"
+      - name: Boot FastMCP then initialize the bundled SDK runtime
+        shell: pwsh
+        run: |
+          $mcpOut = Join-Path $env:RUNNER_TEMP "mcp.out.log"
+          $mcpErr = Join-Path $env:RUNNER_TEMP "mcp.err.log"
+          $mcp = Start-Process -FilePath python -ArgumentList @("-m", "agent3.adapters.mcp.server") -WorkingDirectory $env:GITHUB_WORKSPACE -RedirectStandardOutput $mcpOut -RedirectStandardError $mcpErr -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              Start-Sleep -Milliseconds 250
+              $mcp.Refresh()
+              if ($mcp.HasExited) {
+                Get-Content $mcpErr -ErrorAction SilentlyContinue
+                throw "FastMCP exited before readiness with code $($mcp.ExitCode)"
+              }
+              $client = [System.Net.Sockets.TcpClient]::new()
+              try {
+                $task = $client.ConnectAsync("127.0.0.1", 8900)
+                if ($task.Wait(300) -and $client.Connected) { $ready = $true; break }
+              }
+              catch { }
+              finally { $client.Dispose() }
+            }
+            if (-not $ready) {
+              Get-Content $mcpErr -ErrorAction SilentlyContinue
+              throw "FastMCP did not become reachable on 127.0.0.1:8900"
+            }
+            python scripts/sdk_mcp_boot_smoke.py
+          }
+          finally {
+            if ($null -ne $mcp) {
+              try { $mcp.Refresh() } catch { }
+              if (-not $mcp.HasExited) { Stop-Process -Id $mcp.Id -Force -ErrorAction SilentlyContinue }
+            }
+          }
 
   guard-plugin:
     runs-on: ubuntu-24.04
