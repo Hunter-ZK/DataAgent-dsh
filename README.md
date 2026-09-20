@@ -1,174 +1,151 @@
 # DataAgent-dsh
 
-DataAgent-dsh is the V2/V1 implementation line of Agent3.0 rebuilt around one boundary:
+DataAgent-dsh is the platformized Agent3.0 implementation built around one hard boundary:
 
-> **DeepSeek Harness is a replaceable Agent Runtime; Agent3 is a harness-agnostic Data Intelligence Core.**
+> **DeepSeek Harness is a replaceable local Agent Runtime; Agent3 is the harness-agnostic Data Intelligence Core.**
 
-The repository starts from the validated Agent3.0 capability baseline (`v1-release-hardening-20260913`, source commit `3189fa29da312ba216afa474b9f92f6380363932`) but creates a clean history and a new package layout. Private data, historical database files, and private benchmark assets are not migrated.
+The current pilot architecture uses a local DeepSeek Harness runtime with the DeepSeek Official API. Standard semantic queries stay on the deterministic Query Engine path; exploratory analysis is delegated to dsh. `agent3-api` owns canonical conversation history and stable SSE events.
 
-## Current V1 scope
+## Current delivery scope
 
-This repository implements the delivery line intentionally limited to:
+Implemented on `upgrade/platform-p0-a`:
 
-- Stage 0 — reproducible evaluation + read-only `ExecutionBackend` using DuckDB;
-- Stage 1 — independent Agent3 Core;
-- Stage 2 — thin MCP / HTTP / CLI adapters;
-- Stage 3 — DeepSeek Harness integration assets and guard plugin PoC;
-- minimal Stage 4B semantic model: `aggregation`, `measure`, `mandatory_filters`, `additivity.time`;
-- `AuthzContext` on every Core public method and one-dimension AST row filtering.
+- **P0-Q Query Capability Gate** — route, metric/schema grounding, semantic validity, execution accuracy, clarification/refusal, caveat/scope disclosure and agentic-LLM evidence;
+- **Query Understanding** — conservative natural-language grounding into READY / CLARIFICATION / REFUSAL / EXPLORATORY outcomes;
+- **Programmatic Task Router** — the model does not own final routing;
+- **Agent3 Core** — Metadata, Semantic Model, Trusted SQL, Policy IR and read-only Execution ports;
+- **Query Engine** — Semantic compile → Policy compile → deterministic validation → optional read-only execution;
+- **agent3-api** — canonical conversation owner, Business HITL, SSE replay and dsh SDK orchestration;
+- **DeepSeek Harness Python SDK** — pinned SDK runtime, DeepSeek Official provider and restricted query profile;
+- **Identity boundary** — Trusted Proxy in deployed environments, explicit loopback-only Local Dev Identity for acceptance;
+- **LLM egress controls** — conservative prompt/result boundary with sensitive categories denied by default;
+- **PostgreSQL persistence** — canonical conversation/message/event/clarification stores;
+- **React pilot shell** — conversation UI, SSE events, SQL/result/caveat/scope/refusal/clarification display;
+- **read-only PostgreSQL backend** — optional production/read-replica execution port;
+- **CI** — Python/Core/SDK/dsh/Guard gates plus React/Vite build gate.
 
-Production database execution, a complete Policy Engine, general multi-table semantic compilation, production DDL execution, and enterprise approval/audit storage are explicitly deferred.
+Deferred by design:
+
+- Superset embedding;
+- Tool Approval Bridge / `dataagent-dev-sdk`;
+- warehouse-development UI;
+- organization-specific SSO/LDAP implementation;
+- organization-approved enterprise DLP;
+- real production metadata/semantic assets and real read-replica credentials.
 
 ## Architecture
 
 ```text
-User / API / dsh
-      |
-  Task Contract
-      |
- +----+------------------+
- |                       |
-standard_query       exploratory/dev
- |                       |
-Semantic Query       DeepSeek Harness
-Engine               Agent Loop + Skills
- |                       |
- +----------+------------+
-            |
-       Tool Adapters
-      MCP / HTTP / CLI
-            |
-        Agent3 Core
-            |
-   +--------+---------+
-   |                  |
-Semantic/Metadata  SQL/Policy
-   |                  |
-   +--------+---------+
-            |
-      Execution Port
-            |
-      Eval Backend
-       (DuckDB V1)
+Browser / React Shell
+        |
+Trusted SSO / Reverse Proxy        Local acceptance only:
+        |                           loopback Local Dev Identity
+        +-------------+-------------+
+                      |
+                 agent3-api
+        Canonical conversation owner
+                      |
+              Query Understanding
+                      |
+             Programmatic Router
+              /                \
+     standard query        exploratory
+          |                    |
+      Query Engine          dsh SDK
+          |                    |
+ Semantic Compiler       DeepSeek Official API
+          |                    |
+      Policy IR              MCP
+          |                    |
+ Trusted SQL Gate       Agent3 Core Tools
+          |
+ Read-only Execution
 ```
 
-Core code lives in `src/agent3` and may not import MCP, FastAPI, or dsh. CI enforces this with `scripts/check_architecture.py`.
+`src/agent3` is Core and may not import `agent3_api`, FastAPI, MCP or dsh. CI enforces the dependency direction.
 
 ## Security invariants
 
 The deployment is invalid if any of these is false:
 
-- **INV-S01** — dsh runtime has no production database credentials.
-- **INV-S02** — dsh runtime has no network route to production databases.
-- **INV-S03** — every database access crosses the Agent3 controlled service boundary.
+- dsh has no production database credentials;
+- dsh has no network route to production databases;
+- every database access crosses the Agent3 controlled service boundary;
+- production identity comes from a trusted SSO/reverse-proxy boundary, never browser/model arguments;
+- Local Dev Identity is explicit and may bind only to loopback;
+- DeepSeek Official API is the only intended model egress for the current pilot; identity/authz/credentials and raw row-detail data are not model-visible by default;
+- read-only execution is protected both by application policy and a read-only database role.
 
-The dsh guard plugin is defense in depth and audit glue, not the production security boundary.
+## Local acceptance — recommended next step
 
-## Quick start
+Prerequisites:
 
-Python 3.14 is the compatibility baseline inherited from Agent3.0.
+- Windows PowerShell;
+- Python 3.14;
+- Node.js 24+ / npm;
+- a valid `DEEPSEEK_API_KEY`.
 
-```bash
-python -m pip install -e '.[all]'
-python -m pytest
-python scripts/check_architecture.py
-python examples/stage0_eval.py
-```
-
-MCP PoC is intentionally blocked unless explicitly enabled:
-
-```bash
-export AGENT3_MCP_POC_MODE=1
-python -m agent3.adapters.mcp.server
-```
-
-That mode uses a static PoC identity and MUST NOT be used for production deployment.
-
-### Windows: bootstrap local DeepSeek Harness
-
-The repository does **not** treat `dsh/profile/cordis.patch.yml` as an automatically existing dsh profile. A custom `dataagent` profile must first be created under the Harness Home.
-
-The bootstrap/start scripts now use the same Home resolution as DeepSeek Harness itself:
-
-```text
-explicit DSH_HOME > ~/.dsh
-```
-
-So on a normal Windows account the profile lives under:
-
-```text
-C:\Users\<you>\.dsh\profiles\dataagent
-```
-
-Run once:
+From the repository root on `upgrade/platform-p0-a`:
 
 ```powershell
-.\scripts\setup_dataagent.ps1
-```
-
-The script is idempotent and self-healing. It installs pinned dependencies, creates the custom profile when missing, repairs an incomplete/unloadable local profile left by a failed previous attempt, installs the local Guard bundle, applies the repository profile patch, and validates the effective dsh configuration.
-
-Then provide your DeepSeek official API key:
-
-```powershell
+git checkout upgrade/platform-p0-a
+git pull origin upgrade/platform-p0-a
 $env:DEEPSEEK_API_KEY = "sk-..."
+.\scripts\start_platform.ps1
 ```
 
-Start Agent3 MCP in another terminal:
+The launcher creates/uses `.venv`, installs the platform/MCP and web dependencies, starts the local Agent3 MCP, starts `agent3-api` in **loopback-only Local Dev Identity mode**, and starts the React/Vite shell.
 
-```powershell
-.\.venv\Scripts\Activate.ps1
-$env:AGENT3_MCP_POC_MODE = "1"
-python -m agent3.adapters.mcp.server
-```
-
-Start the local Harness:
-
-```powershell
-.\scripts\start_dataagent.ps1
-```
-
-`start_dataagent.ps1` always runs a lightweight profile self-check before launching Harness, so a missing or stale `dataagent` profile is repaired automatically.
-
-The deployment shape is:
+Open:
 
 ```text
-Local browser
-  -> Local DeepSeek Harness
-  -> DeepSeek official API
-  -> Local Agent3 MCP
-  -> Local Agent3 Core
+http://127.0.0.1:5173
 ```
 
-For the full **Windows local acceptance with a real LLM + MCP + Human-in-the-Loop**, follow [`docs/LOCAL_ACCEPTANCE.md`](docs/LOCAL_ACCEPTANCE.md).
+The Vite dev server proxies `/api` to `127.0.0.1:8080`; the browser never needs to construct production identity headers.
 
-## DeepSeek Harness
+For detailed acceptance steps, use [`docs/LOCAL_ACCEPTANCE.md`](docs/LOCAL_ACCEPTANCE.md).
 
-The repository pins `@deepseek-ai/dsh` to `0.1.6-alpha.2` in `dsh/package.json`. The local Harness uses its native `deepseek-official` provider with `DEEPSEEK_API_KEY`; no local model server, `LOCAL_LLM_KEY`, or `127.0.0.1:8100` endpoint is required. The DataAgent profile disables DeepSeek session upload, telemetry, web search/fetch and the web tool, connects Agent3 over streamable HTTP MCP, and loads the local guard plugin.
+## Production/pilot composition
 
-Before deployment run `scripts/setup_dataagent.ps1` and inspect the generated effective config. Configuration is not accepted as proof of production network isolation; deployment firewalls still own that boundary.
+Production mode does **not** use `AGENT3_DEV_AUTH`. It requires a trusted SSO/reverse proxy and `AGENT3_PROXY_SHARED_SECRET`. See [`docs/PLATFORM_PILOT.md`](docs/PLATFORM_PILOT.md) and [`docs/SECURITY.md`](docs/SECURITY.md).
 
 ## Repository map
 
 ```text
-src/agent3/                 harness-agnostic Python Core
-  contracts/                AuthzContext and stable contracts
-  metadata/                 table/column metadata ports
-  semantic/                 metric registry + deterministic compiler
-  sql/                      sqlglot analysis and validation
-  policy/                   V1 AST row-filter policy
-  execution/                ExecutionBackend port + DuckDB eval backend
-  evaluation/               backend-independent evaluation runner
-  routing/                  Task Contract routing rules
-  adapters/                 MCP / HTTP / CLI protocol projections
-.dsh/skills/                domain workflow instructions
-dsh/                        pinned dsh runtime + profile template + restricted query preset
-guard-plugin/               dsh Cordis guard/audit glue
-semantic_models/            Git source of truth for semantic definitions
-benchmarks/                  public synthetic evaluation seeds
-tests/                       release and architecture gates
-scripts/setup_dataagent.ps1  idempotent/self-healing local profile bootstrap
-scripts/start_dataagent.ps1  self-checking local Harness launcher
+src/agent3/                  harness-agnostic Data Intelligence Core
+  query/                     deterministic Query Understanding
+  metadata/                  Metadata providers and approved assets
+  semantic/                  Metric/dimension registry + compiler
+  policy/                    Policy IR + SQL compiler + egress contract
+  sql/                       SQLGlot analysis and validation
+  execution/                 DuckDB eval + read-only PostgreSQL backend
+  evaluation/                Stage-0 and P0-Q evaluation contracts
+  routing/                   Programmatic Task Router
+
+src/agent3_api/              platform/application layer
+  app.py                     REST/SSE surface
+  orchestrator.py            canonical turn orchestration
+  harness_runtime.py         local dsh SDK runtime pool
+  auth.py                    trusted proxy + local acceptance identity
+  persistence.py             PostgreSQL conversation/event/HITL stores
+
+web/                         React pilot shell
+dsh/sdk/                     restricted SDK invocation patch
+dsh/presets/                 query presets
+guard-plugin/                defense-in-depth dsh guard
+metadata_models/             example approved physical metadata
+semantic_models/             example semantic definitions
+policies/                    Policy IR assets
+benchmarks/                  P0-Q evaluation seeds
+scripts/start_platform.ps1   one-command local acceptance launcher
 ```
 
-See `docs/ARCHITECTURE.md`, `docs/SECURITY.md`, `docs/MIGRATION.md`, and `docs/LOCAL_ACCEPTANCE.md` for design boundaries, migration status, and local acceptance.
+Key documents:
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+- [`docs/SECURITY.md`](docs/SECURITY.md)
+- [`docs/LOCAL_ACCEPTANCE.md`](docs/LOCAL_ACCEPTANCE.md)
+- [`docs/PILOT_ACCEPTANCE.md`](docs/PILOT_ACCEPTANCE.md)
+- [`docs/PLATFORM_PILOT.md`](docs/PLATFORM_PILOT.md)
+- [`docs/MIGRATION.md`](docs/MIGRATION.md)
