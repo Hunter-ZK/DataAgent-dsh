@@ -1,351 +1,337 @@
-# 本地使用与验收指南
+# DataAgent 本地验收指南
 
-本文用于对 DataAgent-dsh V1 做一次**真实本地验收**。正式验收必须同时满足：
+本文用于验收当前平台化分支：
 
-1. Python Core 确定性门禁可独立运行；
-2. DeepSeek Harness 在本机运行并调用 DeepSeek 官方 API，而不是 Mock / 本地模型；
-3. Agent 必须通过 Agent3 MCP 工具获取 SQL 事实；
-4. `submit_ddl` 必须触发 Human-in-the-Loop 审批；
-5. 即使人工批准，V1 也不得真正执行生产 DDL。
-
-> 当前仓库的公开 PoC 元数据只包含合成示例表。你可以自行决定验收 SQL，但如果 SQL 引用了仓库未登记的真实企业表，`UNKNOWN_TABLE` / `UNKNOWN_COLUMN` 是正确结果。接真实企业元数据前，不要把它误判为 SQL 引擎错误。
-
-## 1. 环境基线
-
-CI 验证基线：
-
-- Python 3.14
-- Node.js 24
-- pnpm 11.7.0
-- `@deepseek-ai/dsh` 0.1.6-alpha.2
-
-Windows PowerShell 以下命令均从仓库根目录运行。
-
-```powershell
-git clone https://github.com/Hunter-ZK/DataAgent-dsh.git
-cd DataAgent-dsh
-
-py -3.14 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -e ".[all]"
+```text
+upgrade/platform-p0-a
 ```
 
-Node / dsh / Guard 依赖不需要你手工逐个安装；第 3 节的一键初始化脚本会执行 pinned `npm ci` 和 Guard build。
+本轮正式验收入口不再是 dsh 自带 Web UI，而是：
 
-## 2. 先验收 Python Core
-
-```powershell
-python -m pytest
-python scripts/check_architecture.py
-python examples/stage0_eval.py
+```text
+React Shell
+  -> agent3-api
+  -> Programmatic Router
+      -> Query Engine
+      -> dsh Python SDK -> DeepSeek Official API -> Agent3 MCP
 ```
 
-期望：
+## 1. 本轮要证明什么
 
-- pytest 全绿；
-- `architecture boundaries: OK`；
-- Stage-0 Evaluation 显示全部通过。
+本地验收分四层：
 
-CLI 可以直接审查你自己写的 SQL：
+1. **工程门禁**：Python/Core/dsh/Web CI 对应能力在本机可运行；
+2. **确定性问数**：标准问题能 Grounding、路由、生成可信 SQL，不依赖 LLM 猜测；
+3. **Business HITL**：信息不足时明确澄清，回答后恢复原任务；
+4. **真实 Agent 路径**：开放分析真实启动本地 dsh SDK，调用 DeepSeek Official API，并通过本地 Agent3 MCP 获取可信能力。
+
+本轮不以 `submit_ddl` Tool Approval 为业务问数验收 Gate。Tool Approval Bridge 属于后续数仓开发线。
+
+## 2. 环境要求
+
+建议 Windows PowerShell。
+
+- Python 3.14；
+- Node.js 24+；
+- npm；
+- 能访问 DeepSeek Official API；
+- 有可用 `DEEPSEEK_API_KEY`。
+
+不需要：
+
+- Ollama；
+- vLLM；
+- LM Studio；
+- 本地 DeepSeek 权重；
+- `LOCAL_LLM_KEY`；
+- `127.0.0.1:8100` 模型服务。
+
+## 3. 拉取正确分支
 
 ```powershell
-agent3 validate "SELECT ..."
+git fetch origin
+git checkout upgrade/platform-p0-a
+git pull origin upgrade/platform-p0-a
+git rev-parse HEAD
 ```
 
-如需按公开示例指标检查业务语义：
+不要从旧 `main` 进行本轮平台验收。
+
+## 4. 配置 DeepSeek Key
+
+仅在当前 PowerShell 会话设置：
 
 ```powershell
-agent3 validate "SELECT ..." --metric loan_balance
+$env:DEEPSEEK_API_KEY = "sk-你的真实Key"
 ```
 
-公开 PoC 中可直接识别的核心表为 `dw.dwd_loan_snapshot`，字段包括 `dt`、`org_id`、`region_code`、`product_id`、`balance_amt`、`status`。
+不要写进仓库、配置文件或提交记录。
 
-建议至少覆盖以下行为，但具体 SQL 由验收人自行设计：
+## 5. 一键启动
 
-| 验收点 | 期望 |
+从仓库根目录执行：
+
+```powershell
+.\scripts\start_platform.ps1
+```
+
+第一次运行会自动：
+
+1. 创建 `.venv`（如不存在）；
+2. 安装 Python platform + MCP 依赖；
+3. 安装 React/Vite 依赖；
+4. 设置显式 `AGENT3_DEV_AUTH=1`；
+5. 强制 API 绑定 `127.0.0.1:8080`；
+6. 启动本地 Agent3 MCP `127.0.0.1:8900`；
+7. 启动 `agent3-api`；
+8. 等待 `/api/health` 成功；
+9. 启动 Vite `127.0.0.1:5173`；
+10. 打开浏览器。
+
+浏览器地址：
+
+```text
+http://127.0.0.1:5173
+```
+
+日志目录：
+
+```text
+.runtime/local-acceptance/logs
+```
+
+如果依赖已经装好，可以：
+
+```powershell
+.\scripts\start_platform.ps1 -SkipInstall
+```
+
+如不希望自动打开浏览器：
+
+```powershell
+.\scripts\start_platform.ps1 -NoBrowser
+```
+
+按 `Ctrl+C` 后脚本会清理本轮启动的 API/MCP 子进程。
+
+## 6. Local Dev Identity 是什么
+
+本地验收不要求先安装企业 SSO，但也不能让 React 自己伪造生产身份。
+
+所以当前专门提供：
+
+```text
+AGENT3_DEV_AUTH=1
+```
+
+默认本地身份：
+
+```text
+principal: local-pilot
+roles: analyst, pilot-region-user
+data scope: region_code=4403
+scope version: local-1
+```
+
+关键限制：
+
+- dev auth 只能绑定 loopback；
+- 浏览器提交的 `X-Principal/X-Roles/X-Data-Scopes` 会被忽略；
+- 非 dev 模式仍强制要求 Trusted Proxy Secret；
+- 这个模式禁止用于共享服务器、测试环境或生产部署。
+
+启动后可访问：
+
+```text
+http://127.0.0.1:5173/api/me
+```
+
+预期看到 `local-pilot` 和 `region_code=4403`。
+
+## 7. 第一组：标准问数验收
+
+当前示例资产包括贷款余额指标及深圳/广州地区维度。
+
+先新建会话，输入：
+
+```text
+2026年8月31日深圳贷款余额是多少？
+```
+
+预期：
+
+- 不需要启动 dsh；
+- Query Understanding 命中 `loan_balance`；
+- 识别日期 `2026-08-31`；
+- 识别 `深圳 -> region_code=4403`；
+- Programmatic Router 选择 Query Engine；
+- 生成 SQL；
+- 应出现 scope notice / SQL 等事件；
+- 如果未配置真实 `AGENT3_READ_REPLICA_DSN`，执行状态可以是 disabled，这不是错误。
+
+本轮首先验证的是：
+
+```text
+自然语言
+-> Grounding
+-> QueryIR
+-> Policy
+-> Trusted SQL
+```
+
+而不是必须连接真实数据库。
+
+## 8. 第二组：Business HITL
+
+输入：
+
+```text
+深圳贷款余额是多少？
+```
+
+`loan_balance` 是快照/期末类非时间可加指标，没有日期时不能跨快照求和。
+
+预期：
+
+- 不猜日期；
+- 页面出现 clarification；
+- 明确要求具体快照日期。
+
+回答例如：
+
+```text
+2026年8月31日
+```
+
+预期：
+
+```text
+原问题
++ 用户补充
+-> Query Understanding 重跑
+-> Query Engine
+```
+
+而不是新建一个无关任务。
+
+## 9. 第三组：拒答
+
+输入一个示例 Semantic Registry 中不存在的指标，例如：
+
+```text
+2026年8月31日深圳新能源汽车库存是多少？
+```
+
+预期：
+
+- 不让 LLM 猜表；
+- 不凭常识造指标；
+- 返回 refusal / unsupported；
+- 给出缺少批准指标或语义资产的原因。
+
+这项是 P0-Q 的重要 Gate。
+
+## 10. 第四组：真实 DeepSeek + dsh SDK
+
+输入一个开放分析问题，例如：
+
+```text
+为什么2026年8月31日深圳贷款余额可能出现异常？请基于当前可用数据和工具进行分析，并明确哪些结论有证据、哪些只是待验证假设。
+```
+
+预期调用链：
+
+```text
+React
+ -> agent3-api
+ -> Query Understanding
+ -> Programmatic Router = exploratory
+ -> local dsh Python SDK
+ -> DeepSeek Official API
+ -> Agent3 MCP
+ -> Agent3 Core tools
+ -> stable DataAgent events
+ -> React
+```
+
+你需要确认：
+
+- 确实产生 `thinking/tool_start/tool_result/done` 等事件；
+- dsh SDK 进程真正启动；
+- DeepSeek Official API 真实返回；
+- MCP 可用；
+- 最终回答区分事实与推测；
+- 没有使用 shell/fs/plugin-manager 等开发工具。
+
+如失败，优先看：
+
+```text
+.runtime/local-acceptance/logs/api.err.log
+.runtime/local-acceptance/logs/mcp.err.log
+```
+
+## 11. SSE / 会话验收
+
+本地开发默认使用 in-memory store，所以只验证协议行为：
+
+- 新建多个会话；
+- 切换会话后历史消息不串线；
+- 用户消息和 assistant 消息 ID 不相同；
+- assistant 能关联 `reply_to_message_id`；
+- SSE 事件顺序递增；
+- 页面刷新后可通过事件 API / SSE 重新获取当前进程内事件。
+
+正式 PostgreSQL 跨进程持久化在 Pilot 环境再验收。
+
+## 12. Egress 验收
+
+不要使用真实敏感数据。用假数据测试拦截，例如：
+
+```text
+请分析这个 token：Bearer abcdefghijklmnopqrstuvwxyz
+```
+
+或者构造明显手机号/身份证样式。
+
+预期：在进入 agentic model path 前被 Egress Gate 拒绝。
+
+注意：当前是保守 pilot guard，不代表已经完成企业 DLP。
+
+## 13. 本地验收完成标准
+
+建议至少满足：
+
+| Gate | 完成标准 |
 | --- | --- |
-| 正常 SQL | 无 error 时 `valid=true` |
-| 不存在字段 | `UNKNOWN_COLUMN` |
-| 不存在表 | `UNKNOWN_TABLE` |
-| 缺少分区过滤 | `NO_PARTITION_FILTER` advisory/warning |
-| `DROP/TRUNCATE` | `DROP_OR_TRUNCATE` + `BLOCK` |
-| MaxCompute `INSERT OVERWRITE` 缺 `TABLE` | `MAXCOMPUTE_INSERT_OVERWRITE_TABLE_REQUIRED` + `AUTO_FIX` |
-| `loan_balance` 缺强制口径 | `MISSING_MANDATORY_FILTER` |
-| `loan_balance` 跨多个快照日聚合 | `NON_ADDITIVE_OVER_TIME` |
-
-## 3. 一键初始化本地 DeepSeek Harness profile
-
-### 为什么会看到 `profile dataagent does not exist`
-
-`dsh/profile/cordis.patch.yml` 是**仓库里的 profile patch 模板**，它本身不会自动在 Harness Home 中创建一个名为 `dataagent` 的 profile。
-
-DeepSeek Harness 当前的 Home 解析规则是：
-
-```text
-显式 DSH_HOME > ~/.dsh
-```
-
-因此本仓库现在也使用同一规则。未显式设置 `DSH_HOME` 时，`dataagent` profile 默认创建在：
-
-```text
-~/.dsh/profiles/dataagent
-```
-
-Windows 一般对应：
-
-```text
-C:\Users\<你的用户名>\.dsh\profiles\dataagent
-```
-
-首次使用运行：
-
-```powershell
-.\scripts\setup_dataagent.ps1
-```
-
-脚本会自动完成：
-
-1. `dsh/npm ci`；
-2. `guard-plugin/npm ci` + build；
-3. 检查 `dataagent` profile 是否真正可被 dsh 加载；
-4. 对缺失 profile 自动从 shipped `web` profile 创建；
-5. 对“目录存在但 profile 无效/残缺”的情况自动清理并重建；
-6. 安装本地 `@hunter-zk/agent3-guard` bundle；
-7. 复制仓库 `dsh/profile/cordis.patch.yml`；
-8. 执行 `--dump-config` 检查 `deepseek-official`、MCP、Guard、`dataagent-query`；
-9. 拒绝残留的旧本地模型配置（`127.0.0.1:8100` / `LOCAL_LLM_KEY` / `deepseek-v3-local`）。
-
-如果你明确想从零重建，也仍可以执行：
-
-```powershell
-.\scripts\setup_dataagent.ps1 -ResetProfile
-```
-
-这只会删除本机 `~/.dsh/profiles/dataagent` 后重建，不会修改 Git 仓库。
-
-## 4. 配置真实 DeepSeek API
-
-当前正式验收拓扑是：
-
-```text
-本地浏览器
-  -> 本地 DeepSeek Harness
-  -> DeepSeek 官方 API
-  -> 本地 Agent3 MCP
-  -> 本地 Agent3 Core
-```
-
-**不需要** Ollama、vLLM、LM Studio、本地 DeepSeek 权重、`127.0.0.1:8100` 或 `LOCAL_LLM_KEY`。
-
-在启动 Harness 的同一个 PowerShell 窗口设置：
-
-```powershell
-$env:DEEPSEEK_API_KEY = "sk-你的真实DeepSeekKey"
-```
-
-不要把 key 写入仓库或提交到 Git。
-
-DataAgent profile 使用 Harness 原生 provider：
-
-```text
-provider: deepseek-official
-model: deepseek-flash
-credential ref: DEEPSEEK_API_KEY
-```
-
-也可以先启动 Harness，再在 Web 的 `Settings > Models` 中保存 DeepSeek 凭据；正式验收只要求实际模型调用成功，不要求一定使用环境变量持久化。
-
-## 5. 启动 Agent3 MCP
-
-打开第二个 PowerShell 窗口，进入仓库并激活 Python 环境：
-
-```powershell
-cd <你的 DataAgent-dsh 路径>
-.\.venv\Scripts\Activate.ps1
-$env:AGENT3_MCP_POC_MODE = "1"
-python -m agent3.adapters.mcp.server
-```
-
-PoC MCP 监听：
-
-```text
-http://127.0.0.1:8900/mcp
-```
-
-可另开窗口检查端口：
-
-```powershell
-Test-NetConnection 127.0.0.1 -Port 8900
-```
-
-`TcpTestSucceeded` 应为 `True`。
-
-> `AGENT3_MCP_POC_MODE=1` 使用静态 PoC 身份，仅用于隔离环境验收，不能作为生产身份方案。
-
-## 6. 启动本地 DeepSeek Harness
-
-回到用于 Harness 的 PowerShell，设置 API Key 后：
-
-```powershell
-$env:DEEPSEEK_API_KEY = "sk-你的真实DeepSeekKey"
-.\scripts\start_dataagent.ps1
-```
-
-**推荐始终使用这个脚本启动。** 它每次启动前都会先执行一次轻量幂等自检，自动修复：
-
-- profile 不存在；
-- 之前失败留下的空/残缺 profile 目录；
-- profile 在磁盘上但 dsh 无法加载；
-- Guard bundle 缺失；
-- 仓库 profile patch 未更新。
-
-因为仓库现在默认使用 dsh 官方 `~/.dsh` Home，所以初始化成功后，即使你直接运行仓库内固定版本：
-
-```powershell
-.\dsh\node_modules\.bin\dsh.cmd --profile dataagent
-```
-
-也应该能找到同一个 profile。但日常仍建议使用 `start_dataagent.ps1`，避免环境差异。
-
-默认 Web 地址：
-
-```text
-http://127.0.0.1:3080
-```
-
-新会话默认应使用：
-
-```text
-dataagent-query
-```
-
-## 7. 验收真实 LLM + MCP SQL 闭环
-
-在 Web 会话中粘贴你自己的 SQL，并使用类似指令：
-
-```text
-这是本次验收 SQL。
-你必须真实调用 Agent3 MCP 工具，不允许只凭模型知识判断。
-先调用 validate_sql，再调用 explain_sql。
-如果 validate_sql 返回可修复问题，请根据结构化 code / suggestion 修改 SQL，
-并再次调用 validate_sql，最多自修复 3 轮。
-未经 Agent3 校验通过，不要把候选 SQL 表述为可信 SQL。
-
-SQL：
-<在这里粘贴我自己决定的 SQL>
-```
-
-验收时不要只看最终文字答案，应确认会话中真实出现工具调用，例如：
-
-```text
-mcp__agent3__validate_sql
-mcp__agent3__explain_sql
-```
-
-如果是标准指标问数，还可以要求 Agent 调用：
-
-```text
-mcp__agent3__search_tables
-mcp__agent3__get_schema
-mcp__agent3__resolve_metric
-mcp__agent3__compile_query
-```
-
-这一步验证的是：
-
-```text
-DeepSeek 官方真实 LLM
-  -> 本地 dsh Agent Loop
-  -> Agent3 MCP
-  -> Agent3 Core deterministic evidence
-  -> LLM 基于结构化问题自修复
-  -> 重新校验
-```
-
-## 8. 验收 Human-in-the-Loop
-
-建议做两遍，一遍拒绝、一遍批准。
-
-在 Web 会话中输入：
-
-```text
-这是 HITL 验收。
-请使用 mcp__agent3__submit_ddl 提交下面的 DDL。
-不得使用 bash、shell 或其它旁路。
-
-CREATE TABLE dw.dataagent_hitl_probe (
-  id BIGINT
-);
-```
-
-### 第一次：拒绝
-
-期望：
-
-1. 模型发起 `mcp__agent3__submit_ddl`；
-2. Guard Plugin 在工具执行前发起人工审批；
-3. 你选择拒绝；
-4. 工具不执行，Agent 收到 deny。
-
-### 第二次：允许一次
-
-再次发起同一请求，人工选择 `allowed-once`。
-
-期望：
-
-1. Guard 允许该次 MCP 调用进入 Core；
-2. Core 返回：
-
-```json
-{
-  "accepted": false,
-  "approval_required": true,
-  "execution_enabled": false
-}
-```
-
-3. 数据库中不会创建任何表。
-
-这个结果是刻意设计的：它证明完整 HITL 链路，同时证明 V1 的人工批准**不能越过生产执行边界**。
-
-## 9. 如何判定本地验收通过
-
-一次合格的本地验收至少应同时留下以下证据：
-
-- Python pytest 全绿；
-- Architecture Boundary Gate 通过；
-- Stage-0 result-set evaluation 通过；
-- `setup_dataagent.ps1` 正常创建并验证 `dataagent` profile；
-- dsh Web 实际调用 DeepSeek 官方 API 产生回复；
-- 会话里可以看到实际 Agent3 MCP tool call；
-- 你自己的 SQL 经过 `validate_sql`；
-- SQL 有问题时，模型基于结构化错误做修改并重新验证；
-- HITL 拒绝路径有效；
-- HITL `allowed-once` 路径有效；
-- 即使批准，`submit_ddl` 仍返回 `execution_enabled=false`；
-- `dataagent-query` 会话不提供 bash / 文件写入旁路。
-
-## 10. 当前验收边界
-
-本轮 V1 能正式验收的是：
-
-- SQL deterministic validation；
-- SQL explain；
-- semantic metric resolution；
-- deterministic standard-query generation / `compile_query`；
-- LLM 根据 Validator 反馈进行多轮 self-fix；
-- MCP 工具调用；
-- Human-in-the-Loop approval；
-- Stage-0 result-set evaluation；
-- Guard / profile / security-boundary integration。
-
-以下仍不是 V1 生产能力：
-
-- 真实生产数据库执行；
-- 生产 DDL 执行；
-- 完整企业身份与 Policy Engine；
-- 通用多表 Semantic Compiler；
-- 企业级审批/审计存储。
-
-不要用 PoC 的通过来声称这些能力已经上线。
+| 启动 | 一条 `start_platform.ps1` 可启动 Web/API/MCP |
+| 身份 | `/api/me` 为固定 local-dev 身份，浏览器不能覆盖 |
+| 标准问数 | Query Engine 路由正确，不调用 LLM |
+| Clarification | 缺日期可澄清并恢复 |
+| Refusal | 未批准指标不猜测 |
+| Agentic | DeepSeek Official + dsh SDK + MCP 真调用成功 |
+| Event | SSE thinking/tool/sql/scope/done 正常 |
+| Egress | 明显敏感文本被阻断 |
+| 安全 | dsh query preset 无 shell/fs/plugin-manager |
+
+## 14. 本轮明确不验收
+
+以下内容不要因为本地未出现而判失败：
+
+- 企业 SSO/LDAP；
+- 真实生产只读副本；
+- PostgreSQL 平台持久化；
+- 企业级 DLP；
+- Superset；
+- DDL Tool Approval Bridge；
+- 数仓开发 UI；
+- 5–20 人并发。
+
+这些属于 Pilot 环境 Gate，而不是本地功能验收。
+
+## 15. 验收后下一步
+
+本地验收通过后，不立即继续堆功能。下一步应当：
+
+1. 用 30–50 个真实业务问题替换/扩展 `benchmarks/query_p0.example.jsonl`；
+2. 接入真实 Metadata/Semantic/Policy 资产；
+3. 再进入企业 SSO + read replica + PostgreSQL persistence + DLP 的 Pilot 环境验收。
