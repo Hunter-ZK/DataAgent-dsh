@@ -83,10 +83,11 @@ $env:DEEPSEEK_API_KEY = "sk-你的真实Key"
 4. 设置显式 `AGENT3_DEV_AUTH=1`；
 5. 强制 API 绑定 `127.0.0.1:8080`；
 6. 启动本地 Agent3 MCP `127.0.0.1:8900`；
-7. 启动 `agent3-api`；
-8. 等待 `/api/health` 成功；
-9. 启动 Vite `127.0.0.1:5173`；
-10. 打开浏览器。
+7. **等待 MCP 端口真实 ready 后才继续**；
+8. 启动 `agent3-api`；
+9. 等待 `/api/health` 成功；
+10. 启动 Vite `127.0.0.1:5173`；
+11. 打开浏览器。
 
 浏览器地址：
 
@@ -105,6 +106,8 @@ http://127.0.0.1:5173
 ```powershell
 .\scripts\start_platform.ps1 -SkipInstall
 ```
+
+但**代码、SDK 或依赖刚更新后第一次重跑不要使用 `-SkipInstall`**。
 
 如不希望自动打开浏览器：
 
@@ -254,6 +257,8 @@ React
  -> React
 ```
 
+平台 SDK 路径**显式使用 `deepseek-harness-runtime-bin` 随 Python SDK 安装的 native runtime**。它不应使用仓库 `dsh/node_modules` 中的 Node 开发运行时，也不依赖本机 `DSH_RUNTIME_MODE` 或 PATH 来选择 runtime。
+
 你需要确认：
 
 - 确实产生 `thinking/tool_start/tool_result/done` 等事件；
@@ -269,6 +274,16 @@ React
 .runtime/local-acceptance/logs/api.err.log
 .runtime/local-acceptance/logs/mcp.err.log
 ```
+
+如果看到：
+
+```text
+mcp-client(agent3): initial connection or tool synchronization failed
+ERA_NEGOTIATION_FAILED
+fetch failed
+```
+
+先确认本地代码已经 pull 到最新升级分支。新版 `start_platform.ps1` 会先等待 `127.0.0.1:8900` MCP ready；如果 MCP 本身启动失败，会直接在终端打印 `mcp.err.log` / `mcp.out.log`，而不是只暴露 dsh 的二级网络错误。
 
 ## 11. SSE / 会话验收
 
