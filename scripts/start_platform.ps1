@@ -10,6 +10,37 @@ $runtimeDir = Join-Path $root ".runtime\local-acceptance"
 $logDir = Join-Path $runtimeDir "logs"
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
+function Test-TcpPort {
+    param(
+        [string]$HostName,
+        [int]$Port,
+        [int]$TimeoutMs = 500
+    )
+    $client = [System.Net.Sockets.TcpClient]::new()
+    try {
+        $task = $client.ConnectAsync($HostName, $Port)
+        if (-not $task.Wait($TimeoutMs)) {
+            return $false
+        }
+        return $client.Connected
+    }
+    catch {
+        return $false
+    }
+    finally {
+        $client.Dispose()
+    }
+}
+
+function Show-LogTail {
+    param([string]$Path, [int]$Lines = 80)
+    if (Test-Path $Path) {
+        Write-Host "----- $Path -----" -ForegroundColor Yellow
+        Get-Content $Path -Tail $Lines -ErrorAction SilentlyContinue | Write-Host
+        Write-Host "-----------------" -ForegroundColor Yellow
+    }
+}
+
 if (-not $env:DEEPSEEK_API_KEY) {
     throw "DEEPSEEK_API_KEY is required for the real-LLM acceptance path. Set `$env:DEEPSEEK_API_KEY before running this script."
 }
@@ -45,17 +76,44 @@ $env:AGENT3_DEV_SCOPE_VERSION = "local-1"
 $env:AGENT3_MCP_POC_MODE = "1"
 $env:DSH_TELEMETRY_MODE = "DISABLED"
 
+$mcp = $null
+$api = $null
+
 Write-Host "[DataAgent] Starting local Agent3 MCP on 127.0.0.1:8900..."
 $mcpOut = Join-Path $logDir "mcp.out.log"
 $mcpErr = Join-Path $logDir "mcp.err.log"
 $mcp = Start-Process -FilePath $venvPython -ArgumentList @("-m", "agent3.adapters.mcp.server") -WorkingDirectory $root -RedirectStandardOutput $mcpOut -RedirectStandardError $mcpErr -PassThru
 
-Write-Host "[DataAgent] Starting agent3-api on 127.0.0.1:8080..."
-$apiOut = Join-Path $logDir "api.out.log"
-$apiErr = Join-Path $logDir "api.err.log"
-$api = Start-Process -FilePath $venvPython -ArgumentList @("-m", "agent3_api.main") -WorkingDirectory $root -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr -PassThru
-
 try {
+    # Do not start dsh/API until MCP is actually listening. dsh's MCP client is
+    # deliberately fail-closed (`failOnStartupError: true`), so a startup race
+    # otherwise surfaces as ERA_NEGOTIATION_FAILED / fetch failed.
+    $mcpReady = $false
+    for ($i = 0; $i -lt 60; $i++) {
+        Start-Sleep -Milliseconds 250
+        $mcp.Refresh()
+        if ($mcp.HasExited) {
+            Show-LogTail $mcpErr
+            Show-LogTail $mcpOut
+            throw "Agent3 MCP exited during startup with code $($mcp.ExitCode)."
+        }
+        if (Test-TcpPort -HostName "127.0.0.1" -Port 8900 -TimeoutMs 300) {
+            $mcpReady = $true
+            break
+        }
+    }
+    if (-not $mcpReady) {
+        Show-LogTail $mcpErr
+        Show-LogTail $mcpOut
+        throw "Agent3 MCP did not become reachable on 127.0.0.1:8900 within 15 seconds."
+    }
+    Write-Host "[DataAgent] Agent3 MCP is reachable."
+
+    Write-Host "[DataAgent] Starting agent3-api on 127.0.0.1:8080..."
+    $apiOut = Join-Path $logDir "api.out.log"
+    $apiErr = Join-Path $logDir "api.err.log"
+    $api = Start-Process -FilePath $venvPython -ArgumentList @("-m", "agent3_api.main") -WorkingDirectory $root -RedirectStandardOutput $apiOut -RedirectStandardError $apiErr -PassThru
+
     $ready = $false
     for ($i = 0; $i -lt 40; $i++) {
         Start-Sleep -Milliseconds 500
@@ -64,15 +122,23 @@ try {
             if ($health.ok) { $ready = $true; break }
         }
         catch { }
+        $api.Refresh()
+        $mcp.Refresh()
         if ($api.HasExited) {
-            throw "agent3-api exited during startup. See $apiErr"
+            Show-LogTail $apiErr
+            Show-LogTail $apiOut
+            throw "agent3-api exited during startup with code $($api.ExitCode)."
         }
         if ($mcp.HasExited) {
-            throw "Agent3 MCP exited during startup. See $mcpErr"
+            Show-LogTail $mcpErr
+            Show-LogTail $mcpOut
+            throw "Agent3 MCP exited after becoming ready with code $($mcp.ExitCode)."
         }
     }
     if (-not $ready) {
-        throw "agent3-api did not become healthy. See $apiErr"
+        Show-LogTail $apiErr
+        Show-LogTail $apiOut
+        throw "agent3-api did not become healthy."
     }
 
     Write-Host ""
@@ -84,12 +150,11 @@ try {
     Write-Host ""
     Write-Host "Press Ctrl+C to stop all local acceptance processes."
 
-    if (-not $NoBrowser) {
-        Start-Process "http://127.0.0.1:5173"
-    }
-
     Push-Location (Join-Path $root "web")
     try {
+        if (-not $NoBrowser) {
+            Start-Process "http://127.0.0.1:5173"
+        }
         npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
     }
     finally {
@@ -98,8 +163,11 @@ try {
 }
 finally {
     foreach ($process in @($api, $mcp)) {
-        if ($null -ne $process -and -not $process.HasExited) {
-            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+        if ($null -ne $process) {
+            try { $process.Refresh() } catch { }
+            if (-not $process.HasExited) {
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            }
         }
     }
 }
