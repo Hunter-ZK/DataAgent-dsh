@@ -16,6 +16,7 @@ class HarnessRuntimeConfig:
     provider: str = "deepseek-official"
     model: str = "deepseek-v4-flash"
     profile: str = "sdk"
+    dsh_bin: Path | None = None
     initialize_timeout_seconds: float = 30.0
     request_timeout_seconds: float = 180.0
     idle_ttl_seconds: float = 1800.0
@@ -43,6 +44,12 @@ class HarnessRuntimePool:
 
     This is an identity-binding strategy, not a security sandbox. Database
     credentials remain outside agent3-api/dsh and all data access must cross MCP.
+
+    The platform path deliberately pins the Python SDK to its bundled native
+    ``deepseek-harness-runtime-bin`` executable. It must not inherit a local
+    Node-source carrier through PATH, ``DSH_RUNTIME_MODE`` or the repository's
+    ``dsh/node_modules`` tree. The Node dsh checkout remains a separate Web/debug
+    surface.
     """
 
     def __init__(self, config: HarnessRuntimeConfig, *, harness_factory: Callable[..., Any] | None = None) -> None:
@@ -66,6 +73,26 @@ class HarnessRuntimePool:
             ) from exc
         return DeepSeekHarness
 
+    def _resolve_dsh_bin(self) -> str | None:
+        if self.config.dsh_bin is not None:
+            candidate = self.config.dsh_bin.expanduser().resolve()
+            if not candidate.exists():
+                raise HarnessRuntimeUnavailable(f"configured SDK dsh runtime does not exist: {candidate}")
+            return str(candidate)
+        # Unit-test factories do not need a real runtime wheel.
+        if self._factory is not None:
+            return None
+        try:
+            from deepseek_harness_runtime import bundled_runtime_path
+        except ImportError as exc:  # pragma: no cover - platform install owns this
+            raise HarnessRuntimeUnavailable(
+                "deepseek-harness-runtime-bin is not installed; reinstall the pinned platform extra"
+            ) from exc
+        try:
+            return str(Path(bundled_runtime_path()).resolve())
+        except (FileNotFoundError, RuntimeError, ValueError) as exc:
+            raise HarnessRuntimeUnavailable(f"bundled DeepSeek Harness runtime is unavailable: {exc}") from exc
+
     def _create(self, principal: str) -> _RuntimeHandle:
         key = self._principal_key(principal)
         home = (self.config.root / key).resolve()
@@ -76,17 +103,21 @@ class HarnessRuntimePool:
         if not patch.exists():
             raise HarnessRuntimeUnavailable(f"SDK query patch does not exist: {patch}")
         factory = self._load_factory()
-        harness = factory(
-            dsh_home=str(home),
-            cwd=str(workspace),
-            runtime_cwd=str(Path.cwd().resolve()),
-            profile=self.config.profile,
-            patches=(str(patch),),
-            provider=self.config.provider,
-            model=self.config.model,
-            initialize_timeout_seconds=self.config.initialize_timeout_seconds,
-            request_timeout_seconds=self.config.request_timeout_seconds,
-        )
+        kwargs: dict[str, Any] = {
+            "dsh_home": str(home),
+            "cwd": str(workspace),
+            "runtime_cwd": str(Path.cwd().resolve()),
+            "profile": self.config.profile,
+            "patches": (str(patch),),
+            "provider": self.config.provider,
+            "model": self.config.model,
+            "initialize_timeout_seconds": self.config.initialize_timeout_seconds,
+            "request_timeout_seconds": self.config.request_timeout_seconds,
+        }
+        dsh_bin = self._resolve_dsh_bin()
+        if dsh_bin is not None:
+            kwargs["dsh_bin"] = dsh_bin
+        harness = factory(**kwargs)
         harness.start()
         return _RuntimeHandle(key, harness)
 
