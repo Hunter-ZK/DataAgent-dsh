@@ -92,5 +92,28 @@ def test_runtime_pool_reuses_one_process_per_principal(tmp_path: Path) -> None:
     assert len(_FakeHarness.instances) == 2
     assert _FakeHarness.instances[0].kwargs["provider"] == "deepseek-official"
     assert _FakeHarness.instances[0].kwargs["model"] == "deepseek-v4-flash"
+    assert "dsh_bin" not in _FakeHarness.instances[0].kwargs
     pool.close()
     assert all(instance.closed for instance in _FakeHarness.instances)
+
+
+def test_runtime_pool_can_pin_an_explicit_runtime_binary(tmp_path: Path) -> None:
+    patch = tmp_path / "query.patch.yml"
+    patch.write_text("[]\n", encoding="utf-8")
+    runtime = tmp_path / "dsh-runtime.exe"
+    runtime.write_text("stub", encoding="utf-8")
+    _FakeHarness.instances.clear()
+    pool = HarnessRuntimePool(
+        HarnessRuntimeConfig(
+            root=tmp_path / "homes",
+            workspace_root=tmp_path / "workspaces",
+            patch_file=patch,
+            dsh_bin=runtime,
+        ),
+        harness_factory=_FakeHarness,
+    )
+
+    pool.get("alice")
+
+    assert _FakeHarness.instances[0].kwargs["dsh_bin"] == str(runtime.resolve())
+    pool.close()
